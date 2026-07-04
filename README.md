@@ -55,6 +55,7 @@ Tests mock or isolate Discord, odds APIs, and Ollama. They should not require li
 ## Commands
 
 - `/odds matchup`: fetches DraftKings/FanDuel consensus moneyline odds for the configured sport.
+- `/parlay matchup legs`: builds the best live moneyline parlay anchored to a team or matchup, with combined odds greater than `+100` and less than `+1000`.
 - `/bet amount pick`: logs a fake-dollar pending bet.
 - `/resolve bet_id result`: admin-only grading for `win`, `loss`, or `push`.
 - `/leaderboard`: ranks users strictly by net profit and roasts last place.

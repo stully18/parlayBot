@@ -13,6 +13,7 @@ from .config import Settings, check_settings, load_settings
 from .daily import DailyDropService
 from .odds import OddsClient, OddsError, find_event, format_american
 from .persona import PersonaClient
+from .picks import BuiltParlay, build_best_parlay
 from .storage import BetStore, LeaderboardEntry
 
 
@@ -109,6 +110,32 @@ def _register_commands(bot: DegenBot) -> None:
             lines.append(f"**{outcome.name}** - DK {dk} | FD {fd} | Consensus {consensus}")
         await interaction.followup.send(f"**{event.matchup}**\n" + "\n".join(lines))
 
+    @bot.tree.command(name="parlay", description="Build the best live moneyline parlay for a matchup.")
+    @app_commands.describe(
+        matchup="Team or matchup to anchor the parlay to",
+        legs="Number of legs to include, from 2 to 6",
+    )
+    async def parlay(interaction: discord.Interaction, matchup: str, legs: int) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            events = await bot.odds_client.fetch_odds(bot.settings.sport_key)
+            built = build_best_parlay(events, matchup, legs)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        except OddsError as exc:
+            await interaction.followup.send(f"Live odds are unavailable right now: {exc}", ephemeral=True)
+            return
+
+        if built is None:
+            await interaction.followup.send(
+                f"Could not build a {legs}-leg parlay for `{matchup}` between +101 and +999.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(embed=_parlay_embed(built))
+
     @bot.tree.command(name="bet", description="Log a fake-dollar bet.")
     @app_commands.describe(amount="Fake dollars wagered", pick="Your pick, e.g. Brazil ML")
     async def bet(interaction: discord.Interaction, amount: float, pick: str) -> None:
@@ -203,6 +230,26 @@ def _daily_embed(content: str) -> discord.Embed:
         timestamp=datetime.now(),
     )
     embed.set_footer(text="Fake dollars. Real shame.")
+    return embed
+
+
+def _parlay_embed(parlay: BuiltParlay) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"Best Live Parlay {format_american(parlay.odds)}",
+        description=(
+            f"Anchored to **{parlay.anchor.matchup}**.\n"
+            "Built from live DraftKings/FanDuel consensus moneylines."
+        ),
+        color=discord.Color.green(),
+        timestamp=datetime.now(),
+    )
+    for index, pick in enumerate(parlay.legs, start=1):
+        embed.add_field(
+            name=f"Leg {index}: {pick.selection} ML",
+            value=f"{pick.matchup}\nConsensus {format_american(pick.odds)}",
+            inline=False,
+        )
+    embed.set_footer(text="Filtered to greater than +100 and less than +1000. Fake dollars only.")
     return embed
 
 

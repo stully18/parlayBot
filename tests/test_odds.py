@@ -5,6 +5,7 @@ from parlaybot.odds import (
     normalize_events,
     parlay_american_odds,
 )
+from parlaybot.picks import build_best_parlay
 
 
 def test_normalize_events_filters_books_and_computes_consensus():
@@ -92,3 +93,67 @@ def test_decimal_to_american_and_format():
     assert format_american(-120) == "-120"
     assert format_american(None) == "n/a"
 
+
+def test_build_best_parlay_anchors_query_and_filters_odds_window():
+    events = normalize_events(
+        [
+            _event("game-1", "USA", "Brazil", [("USA", -120), ("Brazil", 110)]),
+            _event("game-2", "France", "Japan", [("France", -150), ("Japan", 130)]),
+            _event("game-3", "Germany", "Canada", [("Germany", -140), ("Canada", 120)]),
+        ],
+        "soccer_fifa_world_cup",
+    )
+
+    parlay = build_best_parlay(events, "Brazil USA", 2)
+
+    assert parlay is not None
+    assert parlay.anchor.matchup == "Brazil at USA"
+    assert len(parlay.legs) == 2
+    assert 101 <= parlay.odds <= 999
+    assert any(leg.matchup == "Brazil at USA" for leg in parlay.legs)
+
+
+def test_build_best_parlay_rejects_invalid_leg_count():
+    try:
+        build_best_parlay([], "USA", 1)
+    except ValueError as exc:
+        assert "between 2 and 6" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_build_best_parlay_returns_none_when_matchup_is_missing():
+    events = normalize_events(
+        [_event("game-1", "USA", "Brazil", [("USA", -120), ("Brazil", 110)])],
+        "soccer_fifa_world_cup",
+    )
+
+    assert build_best_parlay(events, "Atlantis", 2) is None
+
+
+def _event(event_id, home_team, away_team, outcomes):
+    return {
+        "id": event_id,
+        "home_team": home_team,
+        "away_team": away_team,
+        "bookmakers": [
+            {
+                "key": "draftkings",
+                "markets": [
+                    {
+                        "key": "h2h",
+                        "outcomes": [{"name": name, "price": price} for name, price in outcomes],
+                    }
+                ],
+            },
+            {
+                "key": "fanduel",
+                "markets": [
+                    {
+                        "key": "h2h",
+                        "outcomes": [{"name": name, "price": price} for name, price in outcomes],
+                    }
+                ],
+            },
+        ],
+    }
