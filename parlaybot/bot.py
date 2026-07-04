@@ -92,7 +92,8 @@ def _register_commands(bot: DegenBot) -> None:
     @bot.tree.command(name="odds", description="Fetch consensus odds for a matchup.")
     @app_commands.describe(matchup="Team or matchup to search for")
     async def odds(interaction: discord.Interaction, matchup: str) -> None:
-        await interaction.response.defer(thinking=True)
+        if not await _defer_interaction(interaction):
+            return
         try:
             events = await bot.odds_client.fetch_odds(bot.settings.sport_key)
         except OddsError as exc:
@@ -121,7 +122,8 @@ def _register_commands(bot: DegenBot) -> None:
         target_odds="Optional target American odds from +100 to +1000",
     )
     async def parlay(interaction: discord.Interaction, matchup: str, legs: int, target_odds: int | None = None) -> None:
-        await interaction.response.defer(thinking=True)
+        if not await _defer_interaction(interaction):
+            return
         try:
             events = await bot.odds_client.fetch_odds(bot.settings.sport_key)
         except ValueError as exc:
@@ -235,7 +237,8 @@ def _register_commands(bot: DegenBot) -> None:
         if not _can_resolve_bets(interaction):
             await interaction.response.send_message("Admin only. Go win a mod election first.", ephemeral=True)
             return
-        await interaction.response.defer(thinking=True)
+        if not await _defer_interaction(interaction):
+            return
         if not isinstance(interaction.channel, discord.abc.Messageable):
             await interaction.followup.send("This channel cannot receive the daily drop.", ephemeral=True)
             return
@@ -244,7 +247,8 @@ def _register_commands(bot: DegenBot) -> None:
 
     @bot.tree.command(name="leaderboard", description="Show server net-profit rankings.")
     async def leaderboard(interaction: discord.Interaction) -> None:
-        await interaction.response.defer(thinking=True)
+        if not await _defer_interaction(interaction):
+            return
         entries = bot.store.leaderboard()
         if not entries:
             await interaction.followup.send("No bets logged yet. Cowards everywhere.")
@@ -271,6 +275,15 @@ async def _send_daily_drop(bot: DegenBot, channel: discord.abc.Messageable, chan
     drop = await bot.daily_service.build_drop()
     await channel.send(embed=_daily_embed(drop.content))
     bot.daily_service.record_drop(drop, channel_id)
+
+
+async def _defer_interaction(interaction: discord.Interaction) -> bool:
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.NotFound:
+        LOGGER.warning("Discord interaction expired before it could be acknowledged")
+        return False
+    return True
 
 
 def _daily_embed(content: str) -> discord.Embed:

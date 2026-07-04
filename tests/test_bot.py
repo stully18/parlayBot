@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from parlaybot.bot import _can_resolve_bets, _discord_invite_url, _parlay_embed, _send_daily_drop
+import discord
+
+from parlaybot.bot import _can_resolve_bets, _defer_interaction, _discord_invite_url, _parlay_embed, _send_daily_drop
 from parlaybot.config import Settings, check_settings
 from parlaybot.daily import DailyDrop
 from parlaybot.odds import EventOdds, OutcomeOdds
@@ -14,6 +16,12 @@ def test_can_resolve_bets_requires_admin_permission():
 
     assert _can_resolve_bets(denied) is False
     assert _can_resolve_bets(allowed) is True
+
+
+async def test_defer_interaction_drops_expired_interaction():
+    interaction = SimpleNamespace(response=FakeExpiredResponse())
+
+    assert await _defer_interaction(interaction) is False
 
 
 def test_discord_invite_url_includes_command_scope():
@@ -161,6 +169,12 @@ class FakeChannel:
 
     async def send(self, *, embed):
         self.embeds.append(embed)
+
+
+class FakeExpiredResponse:
+    async def defer(self, *, thinking):
+        response = SimpleNamespace(status=404, reason="Not Found")
+        raise discord.NotFound(response, {"code": 10062, "message": "Unknown interaction"})
 
 
 def _async_return(value):
