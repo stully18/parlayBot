@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .odds import EventOdds, OutcomeOdds, american_to_decimal, find_event, parlay_american_odds
+from .odds import EventOdds, OutcomeOdds, PropOdds, american_to_decimal, find_event, parlay_american_odds
 
 
 @dataclass(frozen=True)
@@ -10,6 +10,8 @@ class Pick:
     matchup: str
     selection: str
     odds: int
+    market: str = "Moneyline"
+    conflict_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,7 @@ def build_best_parlay(
     events: list[EventOdds],
     query: str,
     leg_count: int,
+    prop_odds: list[PropOdds] | None = None,
     min_odds: int = 101,
     max_odds: int = 999,
 ) -> BuiltParlay | None:
@@ -71,25 +74,36 @@ def build_best_parlay(
     if anchor is None:
         return None
 
-    best_by_event = [_best_pick_for_event(event) for event in events]
-    candidates = [pick for pick in best_by_event if pick is not None]
-    if len(candidates) < leg_count:
-        return None
+    prop_picks = [_pick_from_prop(prop) for prop in prop_odds or [] if prop.consensus is not None]
+    anchor_candidates = list(prop_picks)
+    anchor_moneyline = _best_pick_for_event(anchor)
+    if anchor_moneyline is not None:
+        anchor_candidates.append(anchor_moneyline)
 
-    anchor_pick = _best_pick_for_event(anchor)
-    if anchor_pick is None:
-        return None
-
-    pool = [pick for pick in candidates if pick.matchup != anchor.matchup]
+    other_moneylines = [
+        pick
+        for event in events
+        if event.matchup != anchor.matchup
+        for pick in [_best_pick_for_event(event)]
+        if pick is not None
+    ]
+    pool = [*anchor_candidates, *other_moneylines]
     pool.sort(key=_parlay_leg_probability, reverse=True)
-    pool = pool[:24]
+    pool = pool[:32]
+    if len(pool) < leg_count or not anchor_candidates:
+        return None
 
     best: tuple[Pick, ...] | None = None
     best_odds: int | None = None
     best_probability = -1.0
 
-    for combo in _combinations(pool, leg_count - 1):
-        legs = (anchor_pick, *combo)
+    for legs in _combinations(pool, leg_count):
+        if not any(pick in anchor_candidates for pick in legs):
+            continue
+        if prop_picks and not any(pick in prop_picks for pick in legs):
+            continue
+        if _has_conflicting_legs(legs):
+            continue
         combined_odds = parlay_american_odds([pick.odds for pick in legs])
         if not min_odds <= combined_odds <= max_odds:
             continue
@@ -134,7 +148,23 @@ def _best_pick_for_event(event: EventOdds) -> Pick | None:
     if not priced:
         return None
     outcome = max(priced, key=lambda candidate: _implied_probability(candidate.consensus))
-    return Pick(matchup=event.matchup, selection=outcome.name, odds=outcome.consensus)
+    return Pick(
+        matchup=event.matchup,
+        selection=f"{outcome.name} ML",
+        odds=outcome.consensus,
+        market="Moneyline",
+        conflict_key=f"{event.matchup}:moneyline",
+    )
+
+
+def _pick_from_prop(prop: PropOdds) -> Pick:
+    return Pick(
+        matchup=prop.matchup,
+        selection=prop.selection,
+        odds=prop.consensus,
+        market=prop.market_name,
+        conflict_key=prop.conflict_key,
+    )
 
 
 def _parlay_leg_probability(pick: Pick) -> float:
@@ -146,6 +176,17 @@ def _combined_implied_probability(legs: tuple[Pick, ...]) -> float:
     for leg in legs:
         probability *= _parlay_leg_probability(leg)
     return probability
+
+
+def _has_conflicting_legs(legs: tuple[Pick, ...]) -> bool:
+    seen: set[str] = set()
+    for leg in legs:
+        if not leg.conflict_key:
+            continue
+        if leg.conflict_key in seen:
+            return True
+        seen.add(leg.conflict_key)
+    return False
 
 
 def _implied_probability(odds: int | None) -> float:

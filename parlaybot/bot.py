@@ -119,7 +119,6 @@ def _register_commands(bot: DegenBot) -> None:
         await interaction.response.defer(thinking=True)
         try:
             events = await bot.odds_client.fetch_odds(bot.settings.sport_key)
-            built = build_best_parlay(events, matchup, legs)
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -127,14 +126,38 @@ def _register_commands(bot: DegenBot) -> None:
             await interaction.followup.send(f"Live odds are unavailable right now: {exc}", ephemeral=True)
             return
 
+        event = find_event(events, matchup)
+        if event is None:
+            await interaction.followup.send(f"Could not find a matchup for `{matchup}`.", ephemeral=True)
+            return
+
+        prop_odds = []
+        prop_note = ""
+        try:
+            prop_odds = await bot.odds_client.fetch_event_props(bot.settings.sport_key, event)
+        except OddsError as exc:
+            prop_note = f"Props could not be fetched, so this used moneylines only: {exc}"
+
+        try:
+            built = build_best_parlay(events, matchup, legs, prop_odds=prop_odds)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        if built is None and prop_odds:
+            built = build_best_parlay(events, matchup, legs)
+            if built is not None:
+                prop_note = "Props were open, but no prop combo fit the odds window. Returned moneylines instead."
+
         if built is None:
             await interaction.followup.send(
-                f"Could not build a {legs}-leg parlay for `{matchup}` between +101 and +999.",
+                f"Could not build a {legs}-leg parlay for `{matchup}` between +101 and +999."
+                f"{f' {prop_note}' if prop_note else ''}",
                 ephemeral=True,
             )
             return
 
-        await interaction.followup.send(embed=_parlay_embed(built))
+        await interaction.followup.send(embed=_parlay_embed(built, props_checked=True, prop_note=prop_note))
 
     @bot.tree.command(name="bet", description="Log a fake-dollar bet.")
     @app_commands.describe(amount="Fake dollars wagered", pick="Your pick, e.g. Brazil ML")
@@ -233,23 +256,31 @@ def _daily_embed(content: str) -> discord.Embed:
     return embed
 
 
-def _parlay_embed(parlay: BuiltParlay) -> discord.Embed:
+def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: str = "") -> discord.Embed:
+    has_prop_leg = any(pick.market != "Moneyline" for pick in parlay.legs)
+    if prop_note:
+        prop_status = prop_note
+    elif has_prop_leg:
+        prop_status = "Props included by default."
+    else:
+        prop_status = "No props were open for this match."
     embed = discord.Embed(
         title=f"Best Live Parlay {format_american(parlay.odds)}",
         description=(
             f"Anchored to **{parlay.anchor.matchup}**.\n"
-            "Built from live DraftKings/FanDuel consensus moneylines."
+            "Built from live DraftKings/FanDuel consensus odds.\n"
+            f"{prop_status if props_checked else ''}"
         ),
         color=discord.Color.green(),
         timestamp=datetime.now(),
     )
     for index, pick in enumerate(parlay.legs, start=1):
         embed.add_field(
-            name=f"Leg {index}: {pick.selection} ML",
+            name=f"Leg {index}: {pick.selection}",
             value=f"{pick.matchup}\nConsensus {format_american(pick.odds)}",
             inline=False,
         )
-    embed.set_footer(text="Filtered to greater than +100 and less than +1000. Fake dollars only.")
+    embed.set_footer(text="Filtered to greater than +100 and less than +1000. Props are tried by default.")
     return embed
 
 

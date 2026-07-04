@@ -2,6 +2,7 @@ from parlaybot.odds import (
     decimal_to_american,
     find_event,
     format_american,
+    normalize_event_props,
     normalize_events,
     parlay_american_odds,
 )
@@ -111,6 +112,79 @@ def test_build_best_parlay_anchors_query_and_filters_odds_window():
     assert len(parlay.legs) == 2
     assert 101 <= parlay.odds <= 999
     assert any(leg.matchup == "Brazil at USA" for leg in parlay.legs)
+
+
+def test_build_best_parlay_uses_props_by_default_when_available():
+    events = normalize_events(
+        [
+            _event("game-1", "USA", "Brazil", [("USA", -220), ("Brazil", 180)]),
+            _event("game-2", "France", "Japan", [("France", -160), ("Japan", 135)]),
+        ],
+        "soccer_fifa_world_cup",
+    )
+    props = normalize_event_props(
+        {
+            "id": "game-1",
+            "home_team": "USA",
+            "away_team": "Brazil",
+            "bookmakers": [
+                {
+                    "key": "draftkings",
+                    "markets": [
+                        {
+                            "key": "player_shots_on_target",
+                            "outcomes": [
+                                {"name": "Over", "description": "Alex Morgan", "price": -120, "point": 1.5},
+                                {"name": "Under", "description": "Alex Morgan", "price": 100, "point": 1.5},
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "key": "fanduel",
+                    "markets": [
+                        {
+                            "key": "player_shots_on_target",
+                            "outcomes": [
+                                {"name": "Over", "description": "Alex Morgan", "price": -110, "point": 1.5},
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    parlay = build_best_parlay(events, "USA Brazil", 2, prop_odds=props)
+
+    assert parlay is not None
+    assert any(leg.market == "Shots on Target" for leg in parlay.legs)
+    assert 101 <= parlay.odds <= 999
+
+
+def test_normalize_event_props_formats_soccer_props():
+    props = normalize_event_props(
+        {
+            "home_team": "USA",
+            "away_team": "Brazil",
+            "bookmakers": [
+                {
+                    "key": "draftkings",
+                    "markets": [
+                        {
+                            "key": "player_goal_scorer_anytime",
+                            "outcomes": [{"name": "Yes", "description": "Neymar", "price": 150}],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert len(props) == 1
+    assert props[0].selection == "Neymar Yes Anytime Goal Scorer"
+    assert props[0].matchup == "Brazil at USA"
+    assert props[0].consensus == 150
 
 
 def test_build_best_parlay_rejects_invalid_leg_count():

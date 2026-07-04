@@ -9,6 +9,36 @@ import aiohttp
 
 
 SUPPORTED_MARKETS = ("h2h",)
+SOCCER_PROP_MARKETS = (
+    "player_goal_scorer_anytime",
+    "player_first_goal_scorer",
+    "player_last_goal_scorer",
+    "player_to_receive_card",
+    "player_to_receive_red_card",
+    "player_shots_on_target",
+    "player_shots",
+    "player_assists",
+)
+SOCCER_GAME_MARKETS = (
+    "btts",
+    "alternate_totals_corners",
+    "alternate_totals_cards",
+    "double_chance",
+)
+PROP_MARKET_NAMES = {
+    "player_goal_scorer_anytime": "Anytime Goal Scorer",
+    "player_first_goal_scorer": "First Goal Scorer",
+    "player_last_goal_scorer": "Last Goal Scorer",
+    "player_to_receive_card": "Card",
+    "player_to_receive_red_card": "Red Card",
+    "player_shots_on_target": "Shots on Target",
+    "player_shots": "Shots",
+    "player_assists": "Assists",
+    "btts": "Both Teams to Score",
+    "alternate_totals_corners": "Total Corners",
+    "alternate_totals_cards": "Total Cards",
+    "double_chance": "Double Chance",
+}
 BOOKMAKER_TITLES = {
     "draftkings": "DraftKings",
     "fanduel": "FanDuel",
@@ -39,6 +69,22 @@ class EventOdds:
     @property
     def matchup(self) -> str:
         return f"{self.away_team} at {self.home_team}"
+
+
+@dataclass(frozen=True)
+class PropOdds:
+    matchup: str
+    market_key: str
+    market_name: str
+    selection: str
+    prices: dict[str, int]
+    conflict_key: str
+
+    @property
+    def consensus(self) -> int | None:
+        if not self.prices:
+            return None
+        return round(sum(self.prices.values()) / len(self.prices))
 
 
 class OddsError(RuntimeError):
@@ -116,6 +162,54 @@ def normalize_events(
     return events
 
 
+def normalize_event_props(
+    payload: dict[str, Any],
+    bookmakers: tuple[str, ...] = ("draftkings", "fanduel"),
+) -> list[PropOdds]:
+    bookmaker_set = {book.lower() for book in bookmakers}
+    matchup = f"{payload.get('away_team', '')} at {payload.get('home_team', '')}"
+    props_by_key: dict[tuple[str, str, str], dict[str, int]] = {}
+    labels_by_key: dict[tuple[str, str, str], str] = {}
+
+    for bookmaker in payload.get("bookmakers", []):
+        book_key = str(bookmaker.get("key", "")).lower()
+        if book_key not in bookmaker_set:
+            continue
+
+        for market in bookmaker.get("markets", []):
+            market_key = str(market.get("key", ""))
+            market_name = PROP_MARKET_NAMES.get(market_key, market_key.replace("_", " ").title())
+            for outcome in market.get("outcomes", []):
+                price = outcome.get("price")
+                if not isinstance(price, int):
+                    continue
+                name = str(outcome.get("name", "")).strip()
+                description = str(outcome.get("description", "")).strip()
+                point = outcome.get("point")
+                label = _prop_label(market_name, name, description, point)
+                if not label:
+                    continue
+
+                conflict_key = _prop_conflict_key(market_key, name, description)
+                key = (market_key, conflict_key, label)
+                props_by_key.setdefault(key, {})[book_key] = price
+                labels_by_key[key] = label
+
+    props = [
+        PropOdds(
+            matchup=matchup,
+            market_key=market_key,
+            market_name=PROP_MARKET_NAMES.get(market_key, market_key.replace("_", " ").title()),
+            selection=labels_by_key[key],
+            prices=dict(sorted(prices.items())),
+            conflict_key=f"{matchup}:{conflict_key}",
+        )
+        for key, prices in props_by_key.items()
+        for market_key, conflict_key, _label in [key]
+    ]
+    return sorted(props, key=lambda prop: (prop.market_name, prop.selection))
+
+
 def find_event(events: list[EventOdds], query: str) -> EventOdds | None:
     needle = query.strip().lower()
     if not needle:
@@ -167,6 +261,68 @@ class OddsClient:
             raise OddsError("Odds API returned an unexpected payload")
         return normalize_events(payload, sport_key=sport_key, bookmakers=self.bookmakers)
 
+    async def fetch_event_markets(self, sport_key: str, event_id: str) -> tuple[str, ...]:
+        if not self.api_key:
+            raise OddsError("ODDS_API_KEY is not configured")
+
+        params = {
+            "apiKey": self.api_key,
+            "regions": "us",
+            "bookmakers": ",".join(self.bookmakers),
+        }
+        url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/markets"
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, params=params) as response:
+                if response.status >= 400:
+                    text = await response.text()
+                    raise OddsError(f"Odds API returned {response.status}: {text[:200]}")
+                payload = await response.json()
+
+        if not isinstance(payload, dict):
+            raise OddsError("Odds API returned an unexpected event-markets payload")
+
+        markets: set[str] = set()
+        for bookmaker in payload.get("bookmakers", []):
+            key = str(bookmaker.get("key", "")).lower()
+            if key not in set(self.bookmakers):
+                continue
+            for market in bookmaker.get("markets", []):
+                market_key = market.get("key")
+                if isinstance(market_key, str):
+                    markets.add(market_key)
+        return tuple(sorted(markets))
+
+    async def fetch_event_props(self, sport_key: str, event: EventOdds) -> list[PropOdds]:
+        available_markets = await self.fetch_event_markets(sport_key, event.event_id)
+        requested_markets = [
+            market
+            for market in (*SOCCER_PROP_MARKETS, *SOCCER_GAME_MARKETS)
+            if market in available_markets
+        ]
+        if not requested_markets:
+            return []
+
+        params = {
+            "apiKey": self.api_key,
+            "regions": "us",
+            "markets": ",".join(requested_markets),
+            "oddsFormat": "american",
+            "bookmakers": ",".join(self.bookmakers),
+        }
+        url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event.event_id}/odds"
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, params=params) as response:
+                if response.status >= 400:
+                    text = await response.text()
+                    raise OddsError(f"Odds API returned {response.status}: {text[:200]}")
+                payload = await response.json()
+
+        if not isinstance(payload, dict):
+            raise OddsError("Odds API returned an unexpected event-odds payload")
+        return normalize_event_props(payload, bookmakers=self.bookmakers)
+
 
 def format_american(odds: int | None) -> str:
     if odds is None:
@@ -188,3 +344,30 @@ def _match_score(needle: str, haystack: str) -> float:
         return 1.0
     return SequenceMatcher(None, needle, haystack).ratio()
 
+
+def _prop_label(market_name: str, name: str, description: str, point: Any) -> str:
+    point_text = _format_point(point)
+    if description and name in {"Over", "Under"} and point_text:
+        return f"{description} {name} {point_text} {market_name}"
+    if description and name:
+        return f"{description} {name} {market_name}"
+    if name and point_text:
+        return f"{name} {point_text} {market_name}"
+    if name:
+        return f"{name} {market_name}"
+    return description
+
+
+def _prop_conflict_key(market_key: str, name: str, description: str) -> str:
+    subject = description or name
+    return f"{market_key}:{subject}".lower()
+
+
+def _format_point(point: Any) -> str:
+    if point is None:
+        return ""
+    if isinstance(point, int):
+        return str(point)
+    if isinstance(point, float) and point.is_integer():
+        return str(int(point))
+    return str(point)
