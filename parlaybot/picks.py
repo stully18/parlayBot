@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .odds import EventOdds, OutcomeOdds, PropOdds, american_to_decimal, find_event, parlay_american_odds
+from .odds import (
+    EventOdds,
+    OutcomeOdds,
+    PropOdds,
+    american_to_decimal,
+    find_event,
+    parlay_american_odds,
+)
 
 
 @dataclass(frozen=True)
@@ -113,8 +120,7 @@ def build_best_parlay(
             if pick is not None
         ]
     pool = [*anchor_candidates, *other_moneylines]
-    pool.sort(key=_parlay_leg_probability, reverse=True)
-    pool = pool[:32]
+    pool = _select_parlay_pool(pool, leg_count=leg_count, target_odds=target_odds)
     if len(pool) < leg_count or not anchor_candidates:
         return None
 
@@ -212,6 +218,35 @@ def _pick_from_prop(prop: PropOdds) -> Pick:
 
 def _parlay_leg_probability(pick: Pick) -> float:
     return _implied_probability(pick.odds)
+
+
+def _select_parlay_pool(pool: list[Pick], leg_count: int, target_odds: int | None) -> list[Pick]:
+    probability_sorted = sorted(pool, key=_parlay_leg_probability, reverse=True)
+    if target_odds is None:
+        return probability_sorted[:32]
+
+    target_leg_decimal = american_to_decimal(target_odds) ** (1 / leg_count)
+    target_sorted = sorted(pool, key=lambda pick: abs(american_to_decimal(pick.odds) - target_leg_decimal))
+    limit = _target_pool_limit(leg_count)
+    selected: list[Pick] = []
+    seen: set[tuple[str, str, str]] = set()
+    for pick in [*probability_sorted[:32], *target_sorted[:32]]:
+        key = (pick.matchup, pick.selection, pick.market)
+        if key in seen:
+            continue
+        selected.append(pick)
+        seen.add(key)
+        if len(selected) == limit:
+            break
+    return selected
+
+
+def _target_pool_limit(leg_count: int) -> int:
+    if leg_count <= 4:
+        return 48
+    if leg_count == 5:
+        return 40
+    return 36
 
 
 def _combined_implied_probability(legs: tuple[Pick, ...]) -> float:

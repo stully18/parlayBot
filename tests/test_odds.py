@@ -2,6 +2,7 @@ import asyncio
 
 from parlaybot.odds import (
     OddsClient,
+    PropOdds,
     decimal_to_american,
     find_event,
     format_american,
@@ -205,6 +206,56 @@ def test_build_best_parlay_targets_odds_window():
     assert parlay is not None
     assert 350 <= parlay.odds <= 450
     assert parlay.target_odds == 400
+
+
+def test_build_best_parlay_target_search_includes_deeper_matching_legs():
+    events = normalize_events(
+        [_event("game-1", "Mexico", "England", [("Mexico", 260), ("England", -300)])],
+        "soccer_fifa_world_cup",
+    )
+    heavy_props = [
+        PropOdds(
+            matchup="England at Mexico",
+            market_key="player_shots",
+            market_name="Shots",
+            selection=f"Safe Player {index} Over 0.5 Shots",
+            prices={"fanduel": -10000 + index},
+            conflict_key=f"England at Mexico:player_shots:safe-{index}",
+        )
+        for index in range(32)
+    ]
+    target_props = [
+        PropOdds("England at Mexico", "player_shots", "Shots", "Harry Kane Over 2.5 Shots", {"fanduel": -170}, "hk"),
+        PropOdds(
+            "England at Mexico",
+            "player_shots_on_target",
+            "Shots on Target",
+            "Raul Jimenez Over 0.5 Shots on Target",
+            {"fanduel": -170},
+            "rj",
+        ),
+        PropOdds(
+            "England at Mexico",
+            "alternate_totals_corners",
+            "Total Corners",
+            "Under 8.5 Total Corners",
+            {"fanduel": -168},
+            "corners-under",
+        ),
+        PropOdds(
+            "England at Mexico",
+            "player_shots_on_target",
+            "Shots on Target",
+            "Julian Quinones Over 0.5 Shots on Target",
+            {"fanduel": -135},
+            "jq",
+        ),
+    ]
+
+    parlay = build_best_parlay(events, "mexico england", 4, prop_odds=[*heavy_props, *target_props], target_odds=600)
+
+    assert parlay is not None
+    assert parlay.odds == 600
 
 
 def test_build_best_parlay_supports_multiple_requested_games():
