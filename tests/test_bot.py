@@ -39,7 +39,7 @@ def test_parlay_embed_includes_bookmaker_links_for_each_leg():
                 matchup="Paraguay at France",
                 selection="France ML",
                 odds=-300,
-                bookmaker_keys=("draftkings", "fanduel"),
+                bookmaker_keys=("bet365", "draftkings", "fanduel"),
             ),
         ),
         odds=133,
@@ -48,6 +48,7 @@ def test_parlay_embed_includes_bookmaker_links_for_each_leg():
     embed = _parlay_embed(built)
 
     field_value = embed.fields[0].value
+    assert "[Bet365](https://www.bet365.com/)" in field_value
     assert "[DraftKings](https://sportsbook.draftkings.com/)" in field_value
     assert "[FanDuel](https://sportsbook.fanduel.com/)" in field_value
 

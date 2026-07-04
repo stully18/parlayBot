@@ -40,7 +40,7 @@ def load_settings() -> Settings:
 
     bookmakers = tuple(
         item.strip().lower()
-        for item in os.getenv("BOOKMAKERS", "draftkings,fanduel").split(",")
+        for item in os.getenv("BOOKMAKERS", "draftkings,fanduel,bet365").split(",")
         if item.strip()
     )
 

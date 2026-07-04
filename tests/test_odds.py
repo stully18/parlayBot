@@ -29,6 +29,10 @@ def test_normalize_events_filters_books_and_computes_consensus():
                     "markets": [{"key": "h2h", "outcomes": [{"name": "USA", "price": 130}]}],
                 },
                 {
+                    "key": "bet365",
+                    "markets": [{"key": "h2h", "outcomes": [{"name": "USA", "price": 140}]}],
+                },
+                {
                     "key": "betmgm",
                     "markets": [{"key": "h2h", "outcomes": [{"name": "USA", "price": -999}]}],
                 },
@@ -40,7 +44,7 @@ def test_normalize_events_filters_books_and_computes_consensus():
 
     assert len(events) == 1
     assert events[0].matchup == "Brazil at USA"
-    assert events[0].outcomes[0].prices == {"draftkings": 150, "fanduel": 130}
+    assert events[0].outcomes[0].prices == {"bet365": 140, "draftkings": 150, "fanduel": 130}
     assert events[0].outcomes[0].consensus == 140
 
 

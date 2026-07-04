@@ -2,7 +2,7 @@
 
 Standalone Python Discord betting bot for a private friend-group server. V1 targets local desktop development, then laptop runtime with local Ollama.
 
-The bot tracks fake-dollar bets, serves DraftKings/FanDuel consensus odds, posts a 10:00 AM Eastern daily drop, and keeps a net-profit leaderboard.
+The bot tracks fake-dollar bets, serves sportsbook consensus odds, posts a 10:00 AM Eastern daily drop, and keeps a net-profit leaderboard.
 
 ## Local Setup
 
@@ -54,7 +54,7 @@ Tests mock or isolate Discord, odds APIs, and Ollama. They should not require li
 
 ## Commands
 
-- `/odds matchup`: fetches DraftKings/FanDuel consensus moneyline odds for the configured sport.
+- `/odds matchup`: fetches sportsbook consensus moneyline odds for the configured sport.
 - `/parlay matchup legs target_odds`: builds the best live parlay anchored to one or more games, with combined odds greater than `+100` and less than `+1000`. `target_odds` is optional; when provided, the bot aims within `+/-50`. Use commas for multiple games, for example `France Paraguay, Brazil Norway`. Soccer props are checked by default for requested matches when the odds API has open prop markets.
 - `/bet amount pick`: logs a fake-dollar pending bet.
 - `/resolve bet_id result`: admin-only grading for `win`, `loss`, or `push`.
@@ -64,7 +64,7 @@ Tests mock or isolate Discord, odds APIs, and Ollama. They should not require li
 ## Config
 
 - `SPORT_KEY` defaults to `soccer_fifa_world_cup`.
-- `BOOKMAKERS` defaults to `draftkings,fanduel`.
+- `BOOKMAKERS` defaults to `draftkings,fanduel,bet365`.
 - `TIMEZONE` defaults to `America/New_York`.
 - `DATABASE_PATH` defaults to `./data/parlaybot.sqlite3`.
 

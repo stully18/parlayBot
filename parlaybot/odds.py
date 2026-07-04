@@ -42,10 +42,12 @@ PROP_MARKET_NAMES = {
     "double_chance": "Double Chance",
 }
 BOOKMAKER_TITLES = {
+    "bet365": "Bet365",
     "draftkings": "DraftKings",
     "fanduel": "FanDuel",
 }
 BOOKMAKER_LINKS = {
+    "bet365": "https://www.bet365.com/",
     "draftkings": "https://sportsbook.draftkings.com/",
     "fanduel": "https://sportsbook.fanduel.com/",
 }
@@ -125,7 +127,7 @@ def parlay_american_odds(legs: list[int] | tuple[int, ...]) -> int:
 def normalize_events(
     payload: list[dict[str, Any]],
     sport_key: str,
-    bookmakers: tuple[str, ...] = ("draftkings", "fanduel"),
+    bookmakers: tuple[str, ...] = ("draftkings", "fanduel", "bet365"),
 ) -> list[EventOdds]:
     bookmaker_set = {book.lower() for book in bookmakers}
     events: list[EventOdds] = []
@@ -170,7 +172,7 @@ def normalize_events(
 
 def normalize_event_props(
     payload: dict[str, Any],
-    bookmakers: tuple[str, ...] = ("draftkings", "fanduel"),
+    bookmakers: tuple[str, ...] = ("draftkings", "fanduel", "bet365"),
 ) -> list[PropOdds]:
     bookmaker_set = {book.lower() for book in bookmakers}
     matchup = f"{payload.get('away_team', '')} at {payload.get('home_team', '')}"

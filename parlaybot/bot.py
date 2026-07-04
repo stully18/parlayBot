@@ -87,7 +87,7 @@ class DegenBot(discord.Client):
 
 
 def _register_commands(bot: DegenBot) -> None:
-    @bot.tree.command(name="odds", description="Fetch DraftKings/FanDuel consensus odds for a matchup.")
+    @bot.tree.command(name="odds", description="Fetch consensus odds for a matchup.")
     @app_commands.describe(matchup="Team or matchup to search for")
     async def odds(interaction: discord.Interaction, matchup: str) -> None:
         await interaction.response.defer(thinking=True)
@@ -104,10 +104,12 @@ def _register_commands(bot: DegenBot) -> None:
 
         lines = []
         for outcome in event.outcomes:
-            dk = format_american(outcome.prices.get("draftkings"))
-            fd = format_american(outcome.prices.get("fanduel"))
+            book_prices = " | ".join(
+                f"{BOOKMAKER_TITLES.get(book_key, book_key.title())} {format_american(price)}"
+                for book_key, price in outcome.prices.items()
+            )
             consensus = format_american(outcome.consensus)
-            lines.append(f"**{outcome.name}** - DK {dk} | FD {fd} | Consensus {consensus}")
+            lines.append(f"**{outcome.name}** - {book_prices} | Consensus {consensus}")
         await interaction.followup.send(f"**{event.matchup}**\n" + "\n".join(lines))
 
     @bot.tree.command(name="parlay", description="Build the best live parlay for a matchup.")
@@ -287,7 +289,7 @@ def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: s
         title=f"Best Live Parlay {format_american(parlay.odds)}",
         description=(
             f"Anchored to **{parlay.anchor.matchup}**.\n"
-            f"Built from live DraftKings/FanDuel consensus odds.{target_line}\n"
+            f"Built from live sportsbook consensus odds.{target_line}\n"
             f"{prop_status if props_checked else ''}"
         ),
         color=discord.Color.green(),
