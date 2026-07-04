@@ -26,6 +26,7 @@ class BuiltParlay:
     anchor: EventOdds
     legs: tuple[Pick, ...]
     odds: int
+    target_odds: int | None = None
 
 
 def choose_daily_picks(events: list[EventOdds]) -> DailyPicks:
@@ -64,26 +65,45 @@ def build_best_parlay(
     query: str,
     leg_count: int,
     prop_odds: list[PropOdds] | None = None,
+    anchor_events: list[EventOdds] | None = None,
+    target_odds: int | None = None,
     min_odds: int = 101,
     max_odds: int = 999,
 ) -> BuiltParlay | None:
     if leg_count < 2 or leg_count > 6:
         raise ValueError("Parlay legs must be between 2 and 6")
+    if target_odds is not None and not 100 <= target_odds <= 1000:
+        raise ValueError("Target odds must be between +100 and +1000")
 
-    anchor = find_event(events, query)
-    if anchor is None:
+    if target_odds is not None:
+        min_odds = max(101, target_odds - 50)
+        max_odds = min(999, target_odds + 50)
+
+    anchors = anchor_events or _find_requested_events(events, query)
+    if not anchors:
         return None
+    anchor_matchups = {event.matchup for event in anchors}
+    anchor = anchors[0]
 
-    prop_picks = [_pick_from_prop(prop) for prop in prop_odds or [] if prop.consensus is not None]
+    prop_picks = [
+        _pick_from_prop(prop)
+        for prop in prop_odds or []
+        if prop.consensus is not None and _valid_american_odds(prop.consensus)
+    ]
+    prop_picks = [pick for pick in prop_picks if pick.matchup in anchor_matchups]
     anchor_candidates = list(prop_picks)
-    anchor_moneyline = _best_pick_for_event(anchor)
-    if anchor_moneyline is not None:
-        anchor_candidates.append(anchor_moneyline)
+    anchor_moneylines = [
+        pick
+        for event in anchors
+        for pick in [_best_pick_for_event(event)]
+        if pick is not None
+    ]
+    anchor_candidates.extend(anchor_moneylines)
 
     other_moneylines = [
         pick
         for event in events
-        if event.matchup != anchor.matchup
+        if event.matchup not in anchor_matchups
         for pick in [_best_pick_for_event(event)]
         if pick is not None
     ]
@@ -104,13 +124,19 @@ def build_best_parlay(
             continue
         if _has_conflicting_legs(legs):
             continue
+        if _anchor_leg_count(legs, anchor_matchups) < min(len(anchor_matchups), leg_count):
+            continue
         combined_odds = parlay_american_odds([pick.odds for pick in legs])
         if not min_odds <= combined_odds <= max_odds:
             continue
 
         probability = _combined_implied_probability(legs)
-        if best is None or combined_odds < best_odds or (
-            combined_odds == best_odds and probability > best_probability
+        if _is_better_parlay(
+            current_odds=combined_odds,
+            current_probability=probability,
+            best_odds=best_odds,
+            best_probability=best_probability,
+            target_odds=target_odds,
         ):
             best = legs
             best_odds = combined_odds
@@ -118,7 +144,11 @@ def build_best_parlay(
 
     if best is None or best_odds is None:
         return None
-    return BuiltParlay(anchor=anchor, legs=best, odds=best_odds)
+    return BuiltParlay(anchor=anchor, legs=best, odds=best_odds, target_odds=target_odds)
+
+
+def find_requested_events(events: list[EventOdds], query: str) -> list[EventOdds]:
+    return _find_requested_events(events, query)
 
 
 def outcome_source_label(outcome: OutcomeOdds) -> str:
@@ -144,7 +174,11 @@ def _parlay_score(pick: Pick) -> int:
 
 
 def _best_pick_for_event(event: EventOdds) -> Pick | None:
-    priced = [outcome for outcome in event.outcomes if outcome.consensus is not None]
+    priced = [
+        outcome
+        for outcome in event.outcomes
+        if outcome.consensus is not None and _valid_american_odds(outcome.consensus)
+    ]
     if not priced:
         return None
     outcome = max(priced, key=lambda candidate: _implied_probability(candidate.consensus))
@@ -189,10 +223,36 @@ def _has_conflicting_legs(legs: tuple[Pick, ...]) -> bool:
     return False
 
 
+def _anchor_leg_count(legs: tuple[Pick, ...], anchor_matchups: set[str]) -> int:
+    return len({leg.matchup for leg in legs if leg.matchup in anchor_matchups})
+
+
+def _is_better_parlay(
+    current_odds: int,
+    current_probability: float,
+    best_odds: int | None,
+    best_probability: float,
+    target_odds: int | None,
+) -> bool:
+    if best_odds is None:
+        return True
+    if target_odds is not None:
+        current_distance = abs(current_odds - target_odds)
+        best_distance = abs(best_odds - target_odds)
+        return current_distance < best_distance or (
+            current_distance == best_distance and current_probability > best_probability
+        )
+    return current_odds < best_odds or (current_odds == best_odds and current_probability > best_probability)
+
+
 def _implied_probability(odds: int | None) -> float:
-    if odds is None:
+    if odds is None or not _valid_american_odds(odds):
         return 0.0
     return 1 / american_to_decimal(odds)
+
+
+def _valid_american_odds(odds: int) -> bool:
+    return odds != 0
 
 
 def _combinations(pool: list[Pick], size: int) -> list[tuple[Pick, ...]]:
@@ -215,3 +275,19 @@ def _combinations(pool: list[Pick], size: int) -> list[tuple[Pick, ...]]:
 
     walk(0, [])
     return combos
+
+
+def _find_requested_events(events: list[EventOdds], query: str) -> list[EventOdds]:
+    parts = [part.strip() for part in query.split(",") if part.strip()]
+    if not parts:
+        parts = [query]
+
+    requested: list[EventOdds] = []
+    seen: set[str] = set()
+    for part in parts:
+        event = find_event(events, part)
+        if event is None or event.event_id in seen:
+            continue
+        requested.append(event)
+        seen.add(event.event_id)
+    return requested

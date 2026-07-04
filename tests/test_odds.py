@@ -165,6 +165,54 @@ def test_build_best_parlay_uses_props_by_default_when_available():
     assert 101 <= parlay.odds <= 999
 
 
+def test_build_best_parlay_targets_odds_window():
+    events = normalize_events(
+        [
+            _event("game-1", "USA", "Brazil", [("USA", -150), ("Brazil", 130)]),
+            _event("game-2", "France", "Japan", [("France", -150), ("Japan", 130)]),
+            _event("game-3", "Germany", "Canada", [("Germany", -150), ("Canada", 130)]),
+        ],
+        "soccer_fifa_world_cup",
+    )
+
+    parlay = build_best_parlay(events, "USA Brazil", 3, target_odds=400)
+
+    assert parlay is not None
+    assert 350 <= parlay.odds <= 450
+    assert parlay.target_odds == 400
+
+
+def test_build_best_parlay_supports_multiple_requested_games():
+    events = normalize_events(
+        [
+            _event("game-1", "USA", "Brazil", [("USA", -140), ("Brazil", 125)]),
+            _event("game-2", "France", "Japan", [("France", -150), ("Japan", 130)]),
+            _event("game-3", "Germany", "Canada", [("Germany", -300), ("Canada", 250)]),
+        ],
+        "soccer_fifa_world_cup",
+    )
+
+    parlay = build_best_parlay(events, "USA Brazil, France Japan", 2)
+
+    assert parlay is not None
+    assert {leg.matchup for leg in parlay.legs} == {"Brazil at USA", "Japan at France"}
+
+
+def test_build_best_parlay_ignores_zero_odds():
+    events = normalize_events(
+        [
+            _event("game-1", "USA", "Brazil", [("USA", 0), ("Brazil", 125)]),
+            _event("game-2", "France", "Japan", [("France", -150), ("Japan", 130)]),
+        ],
+        "soccer_fifa_world_cup",
+    )
+
+    parlay = build_best_parlay(events, "USA Brazil", 2)
+
+    assert parlay is not None
+    assert all(leg.odds != 0 for leg in parlay.legs)
+
+
 def test_normalize_event_props_formats_soccer_props():
     props = normalize_event_props(
         {

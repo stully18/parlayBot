@@ -13,7 +13,7 @@ from .config import Settings, check_settings, load_settings
 from .daily import DailyDropService
 from .odds import OddsClient, OddsError, find_event, format_american
 from .persona import PersonaClient
-from .picks import BuiltParlay, build_best_parlay
+from .picks import BuiltParlay, build_best_parlay, find_requested_events
 from .storage import BetStore, LeaderboardEntry
 
 
@@ -112,10 +112,11 @@ def _register_commands(bot: DegenBot) -> None:
 
     @bot.tree.command(name="parlay", description="Build the best live parlay for a matchup.")
     @app_commands.describe(
-        matchup="Team or matchup to anchor the parlay to",
+        matchup="Team/matchup to anchor to. Use commas for multiple games.",
         legs="Number of legs to include, from 2 to 6",
+        target_odds="Optional target American odds from +100 to +1000",
     )
-    async def parlay(interaction: discord.Interaction, matchup: str, legs: int) -> None:
+    async def parlay(interaction: discord.Interaction, matchup: str, legs: int, target_odds: int | None = None) -> None:
         await interaction.response.defer(thinking=True)
         try:
             events = await bot.odds_client.fetch_odds(bot.settings.sport_key)
@@ -126,32 +127,47 @@ def _register_commands(bot: DegenBot) -> None:
             await interaction.followup.send(f"Live odds are unavailable right now: {exc}", ephemeral=True)
             return
 
-        event = find_event(events, matchup)
-        if event is None:
+        requested_events = find_requested_events(events, matchup)
+        if not requested_events:
             await interaction.followup.send(f"Could not find a matchup for `{matchup}`.", ephemeral=True)
             return
 
         prop_odds = []
         prop_note = ""
-        try:
-            prop_odds = await bot.odds_client.fetch_event_props(bot.settings.sport_key, event)
-        except OddsError as exc:
-            prop_note = f"Props could not be fetched, so this used moneylines only: {exc}"
+        for event in requested_events:
+            try:
+                prop_odds.extend(await bot.odds_client.fetch_event_props(bot.settings.sport_key, event))
+            except OddsError as exc:
+                prop_note = f"Some props could not be fetched, so missing props were skipped: {exc}"
 
         try:
-            built = build_best_parlay(events, matchup, legs, prop_odds=prop_odds)
+            built = build_best_parlay(
+                events,
+                matchup,
+                legs,
+                prop_odds=prop_odds,
+                anchor_events=requested_events,
+                target_odds=target_odds,
+            )
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
 
         if built is None and prop_odds:
-            built = build_best_parlay(events, matchup, legs)
+            built = build_best_parlay(
+                events,
+                matchup,
+                legs,
+                anchor_events=requested_events,
+                target_odds=target_odds,
+            )
             if built is not None:
                 prop_note = "Props were open, but no prop combo fit the odds window. Returned moneylines instead."
 
+        odds_window = _target_window_label(target_odds)
         if built is None:
             await interaction.followup.send(
-                f"Could not build a {legs}-leg parlay for `{matchup}` between +101 and +999."
+                f"Could not build a {legs}-leg parlay for `{matchup}` {odds_window}."
                 f"{f' {prop_note}' if prop_note else ''}",
                 ephemeral=True,
             )
@@ -258,6 +274,7 @@ def _daily_embed(content: str) -> discord.Embed:
 
 def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: str = "") -> discord.Embed:
     has_prop_leg = any(pick.market != "Moneyline" for pick in parlay.legs)
+    target_line = f"\nTarget: {format_american(parlay.target_odds)} +/-50." if parlay.target_odds else ""
     if prop_note:
         prop_status = prop_note
     elif has_prop_leg:
@@ -268,7 +285,7 @@ def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: s
         title=f"Best Live Parlay {format_american(parlay.odds)}",
         description=(
             f"Anchored to **{parlay.anchor.matchup}**.\n"
-            "Built from live DraftKings/FanDuel consensus odds.\n"
+            f"Built from live DraftKings/FanDuel consensus odds.{target_line}\n"
             f"{prop_status if props_checked else ''}"
         ),
         color=discord.Color.green(),
@@ -282,6 +299,14 @@ def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: s
         )
     embed.set_footer(text="Filtered to greater than +100 and less than +1000. Props are tried by default.")
     return embed
+
+
+def _target_window_label(target_odds: int | None) -> str:
+    if target_odds is None:
+        return "between +101 and +999"
+    low = max(101, target_odds - 50)
+    high = min(999, target_odds + 50)
+    return f"between +{low} and +{high}"
 
 
 def _can_resolve_bets(interaction: discord.Interaction) -> bool:
