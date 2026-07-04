@@ -37,6 +37,7 @@ class BuiltParlay:
     legs: tuple[Pick, ...]
     odds: int
     target_odds: int | None = None
+    matched_target_window: bool = True
 
 
 def choose_daily_picks(events: list[EventOdds]) -> DailyPicks:
@@ -80,6 +81,7 @@ def build_best_parlay(
     include_unrequested_games: bool = True,
     min_odds: int = 101,
     max_odds: int = 999,
+    allow_nearest_target: bool = False,
 ) -> BuiltParlay | None:
     if leg_count < 2 or leg_count > 6:
         raise ValueError("Parlay legs must be between 2 and 6")
@@ -130,6 +132,9 @@ def build_best_parlay(
     best: tuple[Pick, ...] | None = None
     best_odds: int | None = None
     best_probability = -1.0
+    nearest: tuple[Pick, ...] | None = None
+    nearest_odds: int | None = None
+    nearest_probability = -1.0
 
     for legs in _combinations(pool, leg_count):
         leg_keys = {_pick_key(pick) for pick in legs}
@@ -142,10 +147,24 @@ def build_best_parlay(
         if _anchor_leg_count(legs, anchor_matchups) < min(len(anchor_matchups), leg_count):
             continue
         combined_odds = parlay_american_odds([pick.odds for pick in legs])
+        probability = _combined_implied_probability(legs)
+        if (
+            allow_nearest_target
+            and target_odds is not None
+            and _is_better_nearest_target(
+                current_odds=combined_odds,
+                current_probability=probability,
+                nearest_odds=nearest_odds,
+                nearest_probability=nearest_probability,
+                target_odds=target_odds,
+            )
+        ):
+            nearest = legs
+            nearest_odds = combined_odds
+            nearest_probability = probability
         if not min_odds <= combined_odds <= max_odds:
             continue
 
-        probability = _combined_implied_probability(legs)
         if _is_better_parlay(
             current_odds=combined_odds,
             current_probability=probability,
@@ -158,6 +177,21 @@ def build_best_parlay(
             best_probability = probability
 
     if best is None or best_odds is None:
+        if (
+            allow_nearest_target
+            and target_odds is not None
+            and nearest is not None
+            and nearest_odds is not None
+            and 101 <= nearest_odds <= 999
+            and abs(nearest_odds - target_odds) <= 75
+        ):
+            return BuiltParlay(
+                anchor=anchor,
+                legs=nearest,
+                odds=nearest_odds,
+                target_odds=target_odds,
+                matched_target_window=False,
+            )
         return None
     return BuiltParlay(anchor=anchor, legs=best, odds=best_odds, target_odds=target_odds)
 
@@ -295,6 +329,22 @@ def _is_better_parlay(
             current_distance == best_distance and current_probability > best_probability
         )
     return current_odds < best_odds or (current_odds == best_odds and current_probability > best_probability)
+
+
+def _is_better_nearest_target(
+    current_odds: int,
+    current_probability: float,
+    nearest_odds: int | None,
+    nearest_probability: float,
+    target_odds: int,
+) -> bool:
+    if nearest_odds is None:
+        return True
+    current_distance = abs(current_odds - target_odds)
+    nearest_distance = abs(nearest_odds - target_odds)
+    return current_distance < nearest_distance or (
+        current_distance == nearest_distance and current_probability > nearest_probability
+    )
 
 
 def _implied_probability(odds: int | None) -> float:

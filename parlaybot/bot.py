@@ -157,6 +157,7 @@ def _register_commands(bot: DegenBot) -> None:
                     anchor_events=requested_events,
                     target_odds=target_odds,
                     include_unrequested_games=False,
+                    allow_nearest_target=True,
                 )
             )
         except ValueError as exc:
@@ -173,6 +174,7 @@ def _register_commands(bot: DegenBot) -> None:
                     anchor_events=requested_events,
                     target_odds=target_odds,
                     include_unrequested_games=False,
+                    allow_nearest_target=True,
                 )
             )
             if built is not None:
@@ -299,7 +301,12 @@ def _daily_embed(content: str) -> discord.Embed:
 
 def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: str = "") -> discord.Embed:
     has_prop_leg = any(pick.market != "Moneyline" for pick in parlay.legs)
-    target_line = f"\nTarget: {format_american(parlay.target_odds)} +/-50." if parlay.target_odds else ""
+    target_line = ""
+    if parlay.target_odds:
+        target_line = f"\nTarget: {format_american(parlay.target_odds)} +/-50."
+        if not parlay.matched_target_window:
+            miss = abs(parlay.odds - parlay.target_odds)
+            target_line += f"\nClosest live fit missed target by {miss} odds points."
     if prop_note:
         prop_status = prop_note
     elif has_prop_leg:

@@ -208,6 +208,43 @@ def test_build_best_parlay_targets_odds_window():
     assert parlay.target_odds == 400
 
 
+def test_build_best_parlay_can_return_nearest_target_miss():
+    events = normalize_events(
+        [_event("game-1", "Mexico", "England", [("Mexico", 260), ("England", -300)])],
+        "soccer_fifa_world_cup",
+    )
+    props = [
+        PropOdds("England at Mexico", "double_chance", "Double Chance", "England or Draw Double Chance", {"fanduel": -272}, "dc"),
+        PropOdds(
+            "England at Mexico",
+            "player_shots_on_target",
+            "Shots on Target",
+            "Harry Kane Over 0.5 Shots on Target",
+            {"fanduel": -270},
+            "hk-sot",
+        ),
+        PropOdds("England at Mexico", "player_shots", "Shots", "Brian Gutierrez Over 1.5 Shots", {"fanduel": -250}, "bg"),
+        PropOdds("England at Mexico", "player_shots", "Shots", "Jesus Gallardo Over 0.5 Shots", {"fanduel": -230}, "jg"),
+        PropOdds("England at Mexico", "player_shots", "Shots", "Bukayo Saka Over 1.5 Shots", {"fanduel": -220}, "bs"),
+    ]
+
+    strict = build_best_parlay(events, "mexico", 5, prop_odds=props, target_odds=500, include_unrequested_games=False)
+    nearest = build_best_parlay(
+        events,
+        "mexico",
+        5,
+        prop_odds=props,
+        target_odds=500,
+        include_unrequested_games=False,
+        allow_nearest_target=True,
+    )
+
+    assert strict is None
+    assert nearest is not None
+    assert nearest.odds == 448
+    assert not nearest.matched_target_window
+
+
 def test_build_best_parlay_target_search_includes_deeper_matching_legs():
     events = normalize_events(
         [_event("game-1", "Mexico", "England", [("Mexico", 260), ("England", -300)])],
