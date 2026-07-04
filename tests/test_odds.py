@@ -1,4 +1,7 @@
+import asyncio
+
 from parlaybot.odds import (
+    OddsClient,
     decimal_to_american,
     find_event,
     format_american,
@@ -185,6 +188,28 @@ def test_normalize_event_props_formats_soccer_props():
     assert props[0].selection == "Neymar Yes Anytime Goal Scorer"
     assert props[0].matchup == "Brazil at USA"
     assert props[0].consensus == 150
+
+
+async def test_fetch_odds_coalesces_concurrent_requests():
+    client = OddsClient("key", ("draftkings", "fanduel"))
+    calls = 0
+
+    async def fake_request_json(url, params):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        return [_event("game-1", "USA", "Brazil", [("USA", -120), ("Brazil", 110)])]
+
+    client._request_json = fake_request_json
+
+    first, second = await asyncio.gather(
+        client.fetch_odds("soccer_fifa_world_cup"),
+        client.fetch_odds("soccer_fifa_world_cup"),
+    )
+
+    assert calls == 1
+    assert first[0].matchup == "Brazil at USA"
+    assert second[0].matchup == "Brazil at USA"
 
 
 def test_build_best_parlay_rejects_invalid_leg_count():

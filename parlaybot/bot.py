@@ -110,7 +110,7 @@ def _register_commands(bot: DegenBot) -> None:
             lines.append(f"**{outcome.name}** - DK {dk} | FD {fd} | Consensus {consensus}")
         await interaction.followup.send(f"**{event.matchup}**\n" + "\n".join(lines))
 
-    @bot.tree.command(name="parlay", description="Build the best live moneyline parlay for a matchup.")
+    @bot.tree.command(name="parlay", description="Build the best live parlay for a matchup.")
     @app_commands.describe(
         matchup="Team or matchup to anchor the parlay to",
         legs="Number of legs to include, from 2 to 6",

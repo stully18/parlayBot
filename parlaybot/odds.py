@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
+from time import monotonic
 from typing import Any
 
 import aiohttp
@@ -236,92 +238,116 @@ class OddsClient:
     def __init__(self, api_key: str | None, bookmakers: tuple[str, ...]) -> None:
         self.api_key = api_key
         self.bookmakers = bookmakers
+        self.cache_ttl_seconds = 30.0
+        self._cache: dict[str, tuple[float, Any]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
 
     async def fetch_odds(self, sport_key: str) -> list[EventOdds]:
         if not self.api_key:
             raise OddsError("ODDS_API_KEY is not configured")
 
-        params = {
-            "apiKey": self.api_key,
-            "regions": "us",
-            "markets": ",".join(SUPPORTED_MARKETS),
-            "oddsFormat": "american",
-            "bookmakers": ",".join(self.bookmakers),
-        }
-        url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, params=params) as response:
-                if response.status >= 400:
-                    text = await response.text()
-                    raise OddsError(f"Odds API returned {response.status}: {text[:200]}")
-                payload = await response.json()
+        async def load() -> list[EventOdds]:
+            params = {
+                "apiKey": self.api_key,
+                "regions": "us",
+                "markets": ",".join(SUPPORTED_MARKETS),
+                "oddsFormat": "american",
+                "bookmakers": ",".join(self.bookmakers),
+            }
+            url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
+            payload = await self._request_json(url, params=params)
 
-        if not isinstance(payload, list):
-            raise OddsError("Odds API returned an unexpected payload")
-        return normalize_events(payload, sport_key=sport_key, bookmakers=self.bookmakers)
+            if not isinstance(payload, list):
+                raise OddsError("Odds API returned an unexpected payload")
+            return normalize_events(payload, sport_key=sport_key, bookmakers=self.bookmakers)
+
+        return list(await self._cached(f"odds:{sport_key}", load))
 
     async def fetch_event_markets(self, sport_key: str, event_id: str) -> tuple[str, ...]:
         if not self.api_key:
             raise OddsError("ODDS_API_KEY is not configured")
 
-        params = {
-            "apiKey": self.api_key,
-            "regions": "us",
-            "bookmakers": ",".join(self.bookmakers),
-        }
-        url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/markets"
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, params=params) as response:
-                if response.status >= 400:
-                    text = await response.text()
-                    raise OddsError(f"Odds API returned {response.status}: {text[:200]}")
-                payload = await response.json()
+        async def load() -> tuple[str, ...]:
+            params = {
+                "apiKey": self.api_key,
+                "regions": "us",
+                "bookmakers": ",".join(self.bookmakers),
+            }
+            url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/markets"
+            payload = await self._request_json(url, params=params)
 
-        if not isinstance(payload, dict):
-            raise OddsError("Odds API returned an unexpected event-markets payload")
+            if not isinstance(payload, dict):
+                raise OddsError("Odds API returned an unexpected event-markets payload")
 
-        markets: set[str] = set()
-        for bookmaker in payload.get("bookmakers", []):
-            key = str(bookmaker.get("key", "")).lower()
-            if key not in set(self.bookmakers):
-                continue
-            for market in bookmaker.get("markets", []):
-                market_key = market.get("key")
-                if isinstance(market_key, str):
-                    markets.add(market_key)
-        return tuple(sorted(markets))
+            markets: set[str] = set()
+            for bookmaker in payload.get("bookmakers", []):
+                key = str(bookmaker.get("key", "")).lower()
+                if key not in set(self.bookmakers):
+                    continue
+                for market in bookmaker.get("markets", []):
+                    market_key = market.get("key")
+                    if isinstance(market_key, str):
+                        markets.add(market_key)
+            return tuple(sorted(markets))
+
+        return await self._cached(f"markets:{sport_key}:{event_id}", load)
 
     async def fetch_event_props(self, sport_key: str, event: EventOdds) -> list[PropOdds]:
-        available_markets = await self.fetch_event_markets(sport_key, event.event_id)
-        requested_markets = [
-            market
-            for market in (*SOCCER_PROP_MARKETS, *SOCCER_GAME_MARKETS)
-            if market in available_markets
-        ]
-        if not requested_markets:
-            return []
+        async def load() -> list[PropOdds]:
+            available_markets = await self.fetch_event_markets(sport_key, event.event_id)
+            requested_markets = [
+                market
+                for market in (*SOCCER_PROP_MARKETS, *SOCCER_GAME_MARKETS)
+                if market in available_markets
+            ]
+            if not requested_markets:
+                return []
 
-        params = {
-            "apiKey": self.api_key,
-            "regions": "us",
-            "markets": ",".join(requested_markets),
-            "oddsFormat": "american",
-            "bookmakers": ",".join(self.bookmakers),
-        }
-        url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event.event_id}/odds"
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, params=params) as response:
-                if response.status >= 400:
-                    text = await response.text()
-                    raise OddsError(f"Odds API returned {response.status}: {text[:200]}")
-                payload = await response.json()
+            params = {
+                "apiKey": self.api_key,
+                "regions": "us",
+                "markets": ",".join(requested_markets),
+                "oddsFormat": "american",
+                "bookmakers": ",".join(self.bookmakers),
+            }
+            url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event.event_id}/odds"
+            payload = await self._request_json(url, params=params)
 
-        if not isinstance(payload, dict):
-            raise OddsError("Odds API returned an unexpected event-odds payload")
-        return normalize_event_props(payload, bookmakers=self.bookmakers)
+            if not isinstance(payload, dict):
+                raise OddsError("Odds API returned an unexpected event-odds payload")
+            return normalize_event_props(payload, bookmakers=self.bookmakers)
+
+        return list(await self._cached(f"props:{sport_key}:{event.event_id}", load))
+
+    async def _request_json(self, url: str, params: dict[str, str]) -> Any:
+        timeout = aiohttp.ClientTimeout(total=12, connect=5, sock_read=8)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, params=params) as response:
+                    if response.status >= 400:
+                        text = await response.text()
+                        raise OddsError(f"Odds API returned {response.status}: {text[:200]}")
+                    return await response.json()
+        except TimeoutError as exc:
+            raise OddsError("Odds API request timed out; try again in a few seconds") from exc
+        except aiohttp.ClientError as exc:
+            raise OddsError(f"Odds API network error: {exc}") from exc
+
+    async def _cached(self, key: str, load):
+        cached = self._cache.get(key)
+        now = monotonic()
+        if cached and now - cached[0] < self.cache_ttl_seconds:
+            return cached[1]
+
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            cached = self._cache.get(key)
+            now = monotonic()
+            if cached and now - cached[0] < self.cache_ttl_seconds:
+                return cached[1]
+            value = await load()
+            self._cache[key] = (monotonic(), value)
+            return value
 
 
 def format_american(odds: int | None) -> str:
