@@ -258,6 +258,36 @@ def test_build_best_parlay_target_search_includes_deeper_matching_legs():
     assert parlay.odds == 600
 
 
+def test_build_best_parlay_handles_large_six_leg_prop_pool():
+    events = normalize_events(
+        [_event("game-1", "Mexico", "England", [("Mexico", 260), ("England", -300)])],
+        "soccer_fifa_world_cup",
+    )
+    props = [
+        PropOdds(
+            matchup="England at Mexico",
+            market_key="player_shots",
+            market_name="Shots",
+            selection=f"Player {index} Over 0.5 Shots",
+            prices={"fanduel": -100 - (index % 90)},
+            conflict_key=f"England at Mexico:player_shots:player-{index}",
+            links={"fanduel": f"https://example.com/{index}"},
+        )
+        for index in range(90)
+    ]
+
+    parlay = build_best_parlay(
+        events,
+        "mexico",
+        6,
+        prop_odds=props,
+        target_odds=600,
+        include_unrequested_games=False,
+    )
+
+    assert parlay is None or len(parlay.legs) == 6
+
+
 def test_build_best_parlay_supports_multiple_requested_games():
     events = normalize_events(
         [

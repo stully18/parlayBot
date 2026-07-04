@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import argparse
 import logging
+from functools import partial
 from datetime import datetime, time
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -144,27 +145,33 @@ def _register_commands(bot: DegenBot) -> None:
                 prop_note = f"Some props could not be fetched, so missing props were skipped: {exc}"
 
         try:
-            built = build_best_parlay(
-                events,
-                matchup,
-                legs,
-                prop_odds=prop_odds,
-                anchor_events=requested_events,
-                target_odds=target_odds,
-                include_unrequested_games=False,
+            built = await asyncio.to_thread(
+                partial(
+                    build_best_parlay,
+                    events,
+                    matchup,
+                    legs,
+                    prop_odds=prop_odds,
+                    anchor_events=requested_events,
+                    target_odds=target_odds,
+                    include_unrequested_games=False,
+                )
             )
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
 
         if built is None and prop_odds:
-            built = build_best_parlay(
-                events,
-                matchup,
-                legs,
-                anchor_events=requested_events,
-                target_odds=target_odds,
-                include_unrequested_games=False,
+            built = await asyncio.to_thread(
+                partial(
+                    build_best_parlay,
+                    events,
+                    matchup,
+                    legs,
+                    anchor_events=requested_events,
+                    target_odds=target_odds,
+                    include_unrequested_games=False,
+                )
             )
             if built is not None:
                 prop_note = "Props were open, but no prop combo fit the odds window. Returned moneylines instead."

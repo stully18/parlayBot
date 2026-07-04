@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import combinations
 
 from .odds import (
     EventOdds,
@@ -124,14 +125,17 @@ def build_best_parlay(
     if len(pool) < leg_count or not anchor_candidates:
         return None
 
+    anchor_keys = {_pick_key(pick) for pick in anchor_candidates}
+    prop_keys = {_pick_key(pick) for pick in prop_picks}
     best: tuple[Pick, ...] | None = None
     best_odds: int | None = None
     best_probability = -1.0
 
     for legs in _combinations(pool, leg_count):
-        if not any(pick in anchor_candidates for pick in legs):
+        leg_keys = {_pick_key(pick) for pick in legs}
+        if not leg_keys & anchor_keys:
             continue
-        if prop_picks and not any(pick in prop_picks for pick in legs):
+        if prop_keys and not leg_keys & prop_keys:
             continue
         if _has_conflicting_legs(legs):
             continue
@@ -245,8 +249,12 @@ def _target_pool_limit(leg_count: int) -> int:
     if leg_count <= 4:
         return 48
     if leg_count == 5:
-        return 40
-    return 36
+        return 34
+    return 24
+
+
+def _pick_key(pick: Pick) -> tuple[str, str, str, int]:
+    return (pick.matchup, pick.market, pick.selection, pick.odds)
 
 
 def _combined_implied_probability(legs: tuple[Pick, ...]) -> float:
@@ -299,26 +307,8 @@ def _valid_american_odds(odds: int) -> bool:
     return odds != 0
 
 
-def _combinations(pool: list[Pick], size: int) -> list[tuple[Pick, ...]]:
-    if size == 0:
-        return [()]
-    if size > len(pool):
-        return []
-
-    combos: list[tuple[Pick, ...]] = []
-
-    def walk(start: int, current: list[Pick]) -> None:
-        if len(current) == size:
-            combos.append(tuple(current))
-            return
-        remaining_slots = size - len(current)
-        for index in range(start, len(pool) - remaining_slots + 1):
-            current.append(pool[index])
-            walk(index + 1, current)
-            current.pop()
-
-    walk(0, [])
-    return combos
+def _combinations(pool: list[Pick], size: int):
+    return combinations(pool, size)
 
 
 def _find_requested_events(events: list[EventOdds], query: str) -> list[EventOdds]:
