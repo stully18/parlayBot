@@ -13,7 +13,7 @@ from .config import Settings, check_settings, load_settings
 from .daily import DailyDropService
 from .odds import BOOKMAKER_LINKS, BOOKMAKER_TITLES, OddsClient, OddsError, find_event, format_american
 from .persona import PersonaClient
-from .picks import BuiltParlay, build_best_parlay, find_requested_events
+from .picks import BuiltParlay, Pick, build_best_parlay, find_requested_events
 from .storage import BetStore, LeaderboardEntry
 
 
@@ -305,6 +305,13 @@ def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: s
             value=value,
             inline=False,
         )
+    parlay_book_links = _shared_bookmaker_links(parlay.legs)
+    if parlay_book_links:
+        embed.add_field(
+            name="Build Parlay",
+            value=f"{parlay_book_links}\nOpen the book and add the legs above.",
+            inline=False,
+        )
     embed.set_footer(text="Filtered to greater than +100 and less than +1000. Props are tried by default.")
     return embed
 
@@ -318,6 +325,16 @@ def _bookmaker_links(bookmaker_keys: tuple[str, ...]) -> str:
         title = BOOKMAKER_TITLES.get(key, key.title())
         links.append(f"[{title}]({url})")
     return " | ".join(links)
+
+
+def _shared_bookmaker_links(picks: tuple[Pick, ...]) -> str:
+    if not picks:
+        return ""
+    shared_books = set(picks[0].bookmaker_keys)
+    for pick in picks[1:]:
+        shared_books &= set(pick.bookmaker_keys)
+    ordered_books = tuple(book for book in BOOKMAKER_LINKS if book in shared_books)
+    return _bookmaker_links(ordered_books)
 
 
 def _target_window_label(target_odds: int | None) -> str:

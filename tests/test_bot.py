@@ -53,6 +53,64 @@ def test_parlay_embed_includes_bookmaker_links_for_each_leg():
     assert "[FanDuel](https://sportsbook.fanduel.com/)" in field_value
 
 
+def test_parlay_embed_includes_shared_bookmaker_link_at_bottom():
+    anchor = EventOdds(
+        event_id="game-1",
+        sport_key="soccer_fifa_world_cup",
+        commence_time=None,
+        home_team="France",
+        away_team="Paraguay",
+        outcomes=(OutcomeOdds(name="France", prices={"fanduel": -300}),),
+    )
+    built = BuiltParlay(
+        anchor=anchor,
+        legs=(
+            Pick(
+                matchup="Paraguay at France",
+                selection="Over 11.5 Total Corners",
+                odds=-310,
+                bookmaker_keys=("fanduel",),
+            ),
+            Pick(
+                matchup="Paraguay at France",
+                selection="Ousmane Dembele Over 0.5 Shots on Target",
+                odds=-125,
+                bookmaker_keys=("fanduel",),
+            ),
+        ),
+        odds=141,
+    )
+
+    embed = _parlay_embed(built)
+
+    build_field = embed.fields[-1]
+    assert build_field.name == "Build Parlay"
+    assert "[FanDuel](https://sportsbook.fanduel.com/)" in build_field.value
+
+
+def test_parlay_embed_skips_bottom_link_without_shared_bookmaker():
+    anchor = EventOdds(
+        event_id="game-1",
+        sport_key="soccer_fifa_world_cup",
+        commence_time=None,
+        home_team="France",
+        away_team="Paraguay",
+        outcomes=(OutcomeOdds(name="France", prices={"fanduel": -300}),),
+    )
+    built = BuiltParlay(
+        anchor=anchor,
+        legs=(
+            Pick(matchup="Paraguay at France", selection="France ML", odds=-300, bookmaker_keys=("fanduel",)),
+            Pick(matchup="Paraguay at France", selection="Over 2.5 Shots", odds=-125, bookmaker_keys=("bet365",)),
+        ),
+        odds=141,
+    )
+
+    embed = _parlay_embed(built)
+
+    assert all(field.name != "Build Parlay" for field in embed.fields)
+
+
 def test_check_settings_reports_missing_token_as_error():
     settings = Settings(
         discord_token="",
