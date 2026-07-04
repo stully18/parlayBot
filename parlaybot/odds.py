@@ -45,6 +45,10 @@ BOOKMAKER_TITLES = {
     "draftkings": "DraftKings",
     "fanduel": "FanDuel",
 }
+BOOKMAKER_LINKS = {
+    "draftkings": "https://sportsbook.draftkings.com/",
+    "fanduel": "https://sportsbook.fanduel.com/",
+}
 
 
 @dataclass(frozen=True)

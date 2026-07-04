@@ -1,10 +1,11 @@
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from parlaybot.bot import _can_resolve_bets, _discord_invite_url, _send_daily_drop
+from parlaybot.bot import _can_resolve_bets, _discord_invite_url, _parlay_embed, _send_daily_drop
 from parlaybot.config import Settings, check_settings
 from parlaybot.daily import DailyDrop
-from parlaybot.picks import DailyPicks
+from parlaybot.odds import EventOdds, OutcomeOdds
+from parlaybot.picks import BuiltParlay, DailyPicks, Pick
 
 
 def test_can_resolve_bets_requires_admin_permission():
@@ -20,6 +21,35 @@ def test_discord_invite_url_includes_command_scope():
 
     assert "client_id=123" in url
     assert "scope=bot+applications.commands" in url
+
+
+def test_parlay_embed_includes_bookmaker_links_for_each_leg():
+    anchor = EventOdds(
+        event_id="game-1",
+        sport_key="soccer_fifa_world_cup",
+        commence_time=None,
+        home_team="France",
+        away_team="Paraguay",
+        outcomes=(OutcomeOdds(name="France", prices={"draftkings": -300}),),
+    )
+    built = BuiltParlay(
+        anchor=anchor,
+        legs=(
+            Pick(
+                matchup="Paraguay at France",
+                selection="France ML",
+                odds=-300,
+                bookmaker_keys=("draftkings", "fanduel"),
+            ),
+        ),
+        odds=133,
+    )
+
+    embed = _parlay_embed(built)
+
+    field_value = embed.fields[0].value
+    assert "[DraftKings](https://sportsbook.draftkings.com/)" in field_value
+    assert "[FanDuel](https://sportsbook.fanduel.com/)" in field_value
 
 
 def test_check_settings_reports_missing_token_as_error():

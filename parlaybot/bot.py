@@ -11,7 +11,7 @@ from discord.ext import tasks
 
 from .config import Settings, check_settings, load_settings
 from .daily import DailyDropService
-from .odds import OddsClient, OddsError, find_event, format_american
+from .odds import BOOKMAKER_LINKS, BOOKMAKER_TITLES, OddsClient, OddsError, find_event, format_american
 from .persona import PersonaClient
 from .picks import BuiltParlay, build_best_parlay, find_requested_events
 from .storage import BetStore, LeaderboardEntry
@@ -294,13 +294,28 @@ def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: s
         timestamp=datetime.now(),
     )
     for index, pick in enumerate(parlay.legs, start=1):
+        book_links = _bookmaker_links(pick.bookmaker_keys)
+        value = f"{pick.matchup}\nConsensus {format_american(pick.odds)}"
+        if book_links:
+            value = f"{value}\nBooks: {book_links}"
         embed.add_field(
             name=f"Leg {index}: {pick.selection}",
-            value=f"{pick.matchup}\nConsensus {format_american(pick.odds)}",
+            value=value,
             inline=False,
         )
     embed.set_footer(text="Filtered to greater than +100 and less than +1000. Props are tried by default.")
     return embed
+
+
+def _bookmaker_links(bookmaker_keys: tuple[str, ...]) -> str:
+    links = []
+    for key in bookmaker_keys:
+        url = BOOKMAKER_LINKS.get(key)
+        if not url:
+            continue
+        title = BOOKMAKER_TITLES.get(key, key.title())
+        links.append(f"[{title}]({url})")
+    return " | ".join(links)
 
 
 def _target_window_label(target_odds: int | None) -> str:
