@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from parlaybot.bot import _can_resolve_bets, _send_daily_drop
+from parlaybot.bot import _can_resolve_bets, _discord_invite_url, _send_daily_drop
 from parlaybot.config import Settings, check_settings
 from parlaybot.daily import DailyDrop
 from parlaybot.picks import DailyPicks
@@ -13,6 +13,13 @@ def test_can_resolve_bets_requires_admin_permission():
 
     assert _can_resolve_bets(denied) is False
     assert _can_resolve_bets(allowed) is True
+
+
+def test_discord_invite_url_includes_command_scope():
+    url = _discord_invite_url(123)
+
+    assert "client_id=123" in url
+    assert "scope=bot+applications.commands" in url
 
 
 def test_check_settings_reports_missing_token_as_error():

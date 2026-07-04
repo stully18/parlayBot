@@ -20,10 +20,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 class DegenBot(discord.Client):
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, smoke_test: bool = False) -> None:
         intents = discord.Intents.default()
         super().__init__(intents=intents)
         self.settings = settings
+        self.smoke_test = smoke_test
         self.tree = app_commands.CommandTree(self)
         self.store = BetStore(settings.database_path)
         self.odds_client = OddsClient(settings.odds_api_key, settings.bookmakers)
@@ -42,10 +43,24 @@ class DegenBot(discord.Client):
         if self.settings.discord_guild_id:
             guild = discord.Object(id=self.settings.discord_guild_id)
             self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
+            try:
+                await self.tree.sync(guild=guild)
+            except discord.Forbidden as exc:
+                invite_url = _discord_invite_url(self.application_id)
+                raise RuntimeError(
+                    "Discord refused guild command sync with 403 Missing Access. "
+                    "Confirm the bot is invited to DISCORD_GUILD_ID with the bot and "
+                    f"applications.commands scopes. Invite URL: {invite_url}"
+                ) from exc
         else:
             await self.tree.sync()
         self.daily_drop_loop.start()
+
+    async def on_ready(self) -> None:
+        LOGGER.info("Logged in as %s (%s)", self.user, self.user.id if self.user else "unknown")
+        if self.smoke_test:
+            LOGGER.info("Smoke test reached Discord ready; shutting down")
+            asyncio.create_task(self.close())
 
     async def close(self) -> None:
         self.daily_drop_loop.cancel()
@@ -196,10 +211,38 @@ def _can_resolve_bets(interaction: discord.Interaction) -> bool:
     return bool(getattr(permissions, "administrator", False))
 
 
+def _discord_invite_url(application_id: int | None) -> str:
+    if application_id is None:
+        return "unavailable until Discord login completes"
+    permissions = 83968
+    return (
+        "https://discord.com/oauth2/authorize"
+        f"?client_id={application_id}"
+        f"&permissions={permissions}"
+        "&integration_type=0"
+        "&scope=bot+applications.commands"
+    )
+
+
+async def _run_bot(bot: DegenBot, token: str, timeout_seconds: float | None = None) -> None:
+    try:
+        if timeout_seconds is None:
+            await bot.start(token)
+        else:
+            await asyncio.wait_for(bot.start(token), timeout=timeout_seconds)
+    except TimeoutError as exc:
+        raise RuntimeError(f"Discord startup smoke test did not become ready within {timeout_seconds:g} seconds") from exc
+    finally:
+        if not bot.is_closed():
+            await bot.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run The Degen Bot.")
     parser.add_argument("--check-config", action="store_true", help="Validate local configuration and exit.")
     parser.add_argument("--init-db", action="store_true", help="Initialize the SQLite database and exit.")
+    parser.add_argument("--smoke-test", action="store_true", help="Connect to Discord, sync commands, then exit.")
+    parser.add_argument("--smoke-timeout", type=float, default=60.0, help="Seconds to wait for --smoke-test readiness.")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -223,5 +266,9 @@ def main() -> None:
     if not check.ok:
         raise SystemExit("\n".join(check.errors))
 
-    bot = DegenBot(settings)
-    asyncio.run(bot.start(settings.discord_token))
+    bot = DegenBot(settings, smoke_test=args.smoke_test)
+    try:
+        timeout_seconds = args.smoke_timeout if args.smoke_test else None
+        asyncio.run(_run_bot(bot, settings.discord_token, timeout_seconds=timeout_seconds))
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc

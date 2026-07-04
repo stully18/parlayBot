@@ -38,9 +38,11 @@ Before starting the bot, validate local config and initialize the database:
 ```bash
 ./.venv/bin/python -m parlaybot --check-config
 ./.venv/bin/python -m parlaybot --init-db
+./.venv/bin/python -m parlaybot --smoke-test
 ```
 
 `--check-config` requires `DISCORD_TOKEN` for a clean pass. It warns, but does not fail, when `ODDS_API_KEY` is missing because the bot has fallback copy for unavailable odds.
+`--smoke-test` connects to Discord, syncs slash commands, reaches ready, and exits.
 
 ## Test
 
