@@ -22,6 +22,13 @@ class Settings:
     timezone: ZoneInfo
 
 
+@dataclass(frozen=True)
+class ConfigCheck:
+    ok: bool
+    errors: tuple[str, ...]
+    warnings: tuple[str, ...]
+
+
 def _optional_int(value: str | None) -> int | None:
     if not value:
         return None
@@ -51,3 +58,20 @@ def load_settings() -> Settings:
         timezone=ZoneInfo(os.getenv("TIMEZONE", "America/New_York")),
     )
 
+
+def check_settings(settings: Settings) -> ConfigCheck:
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not settings.discord_token:
+        errors.append("DISCORD_TOKEN is required to start the bot.")
+    if settings.discord_channel_id is None:
+        warnings.append("DISCORD_CHANNEL_ID is not set; scheduled daily drops and /dropnow need a channel.")
+    if not settings.odds_api_key:
+        warnings.append("ODDS_API_KEY is not set; /odds and daily picks will use fallback behavior.")
+    if not settings.bookmakers:
+        errors.append("BOOKMAKERS must include at least one bookmaker key.")
+    if settings.odds_provider != "the_odds_api":
+        warnings.append("Only ODDS_PROVIDER=the_odds_api is implemented in V1.")
+
+    return ConfigCheck(ok=not errors, errors=tuple(errors), warnings=tuple(warnings))

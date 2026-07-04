@@ -33,6 +33,15 @@ OLLAMA_MODEL=llama3:8b-instruct-q4_0
 
 The SQLite database is created at `./data/parlaybot.sqlite3` by default. Runtime databases, logs, virtualenvs, caches, and secrets are ignored by git.
 
+Before starting the bot, validate local config and initialize the database:
+
+```bash
+./.venv/bin/python -m parlaybot --check-config
+./.venv/bin/python -m parlaybot --init-db
+```
+
+`--check-config` requires `DISCORD_TOKEN` for a clean pass. It warns, but does not fail, when `ODDS_API_KEY` is missing because the bot has fallback copy for unavailable odds.
+
 ## Test
 
 ```bash
@@ -47,6 +56,7 @@ Tests mock or isolate Discord, odds APIs, and Ollama. They should not require li
 - `/bet amount pick`: logs a fake-dollar pending bet.
 - `/resolve bet_id result`: admin-only grading for `win`, `loss`, or `push`.
 - `/leaderboard`: ranks users strictly by net profit and roasts last place.
+- `/dropnow`: admin-only command to post the daily drop immediately. Use this for same-day launch or testing after 10:00 AM Eastern.
 
 ## Config
 

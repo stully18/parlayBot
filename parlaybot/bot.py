@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 import logging
 from datetime import datetime, time
 
@@ -8,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from .config import Settings, load_settings
+from .config import Settings, check_settings, load_settings
 from .daily import DailyDropService
 from .odds import OddsClient, OddsError, find_event, format_american
 from .persona import PersonaClient
@@ -62,9 +63,7 @@ class DegenBot(discord.Client):
             LOGGER.warning("Configured daily-drop channel is not messageable")
             return
 
-        drop = await self.daily_service.build_drop()
-        await channel.send(embed=_daily_embed(drop.content))
-        self.daily_service.record_drop(drop, self.settings.discord_channel_id)
+        await _send_daily_drop(self, channel, self.settings.discord_channel_id)
 
     @daily_drop_loop.before_loop
     async def before_daily_drop(self) -> None:
@@ -115,6 +114,13 @@ def _register_commands(bot: DegenBot) -> None:
 
     @bot.tree.command(name="resolve", description="Admin: grade a bet as win, loss, or push.")
     @app_commands.describe(bet_id="Bet ID to resolve", result="win, loss, or push")
+    @app_commands.choices(
+        result=[
+            app_commands.Choice(name="win", value="win"),
+            app_commands.Choice(name="loss", value="loss"),
+            app_commands.Choice(name="push", value="push"),
+        ]
+    )
     async def resolve(interaction: discord.Interaction, bet_id: int, result: str) -> None:
         if not _can_resolve_bets(interaction):
             await interaction.response.send_message("Admin only. Go win a mod election first.", ephemeral=True)
@@ -130,6 +136,18 @@ def _register_commands(bot: DegenBot) -> None:
             f"Bet #{resolved.id} graded {resolved.result}. "
             f"{resolved.username} P&L: ${resolved.profit:.2f}."
         )
+
+    @bot.tree.command(name="dropnow", description="Admin: post the daily drop immediately.")
+    async def dropnow(interaction: discord.Interaction) -> None:
+        if not _can_resolve_bets(interaction):
+            await interaction.response.send_message("Admin only. Go win a mod election first.", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        if not isinstance(interaction.channel, discord.abc.Messageable):
+            await interaction.followup.send("This channel cannot receive the daily drop.", ephemeral=True)
+            return
+        await _send_daily_drop(bot, interaction.channel, interaction.channel_id)
+        await interaction.followup.send("Daily drop posted.")
 
     @bot.tree.command(name="leaderboard", description="Show server net-profit rankings.")
     async def leaderboard(interaction: discord.Interaction) -> None:
@@ -156,6 +174,12 @@ async def _last_place_roast(bot: DegenBot, entries: list[LeaderboardEntry]) -> s
     return await bot.persona_client.last_place_roast(entries[-1])
 
 
+async def _send_daily_drop(bot: DegenBot, channel: discord.abc.Messageable, channel_id: int | None) -> None:
+    drop = await bot.daily_service.build_drop()
+    await channel.send(embed=_daily_embed(drop.content))
+    bot.daily_service.record_drop(drop, channel_id)
+
+
 def _daily_embed(content: str) -> discord.Embed:
     embed = discord.Embed(
         title="The Degen Bot Daily Drop",
@@ -173,9 +197,31 @@ def _can_resolve_bets(interaction: discord.Interaction) -> bool:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run The Degen Bot.")
+    parser.add_argument("--check-config", action="store_true", help="Validate local configuration and exit.")
+    parser.add_argument("--init-db", action="store_true", help="Initialize the SQLite database and exit.")
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO)
     settings = load_settings()
-    if not settings.discord_token:
-        raise SystemExit("DISCORD_TOKEN is required")
+
+    if args.init_db:
+        BetStore(settings.database_path).initialize()
+        print(f"Initialized database at {settings.database_path}")
+        return
+
+    check = check_settings(settings)
+    if args.check_config:
+        for warning in check.warnings:
+            print(f"WARNING: {warning}")
+        for error in check.errors:
+            print(f"ERROR: {error}")
+        if check.ok:
+            print("Config is sufficient to start the bot.")
+        raise SystemExit(0 if check.ok else 1)
+
+    if not check.ok:
+        raise SystemExit("\n".join(check.errors))
+
     bot = DegenBot(settings)
     asyncio.run(bot.start(settings.discord_token))
