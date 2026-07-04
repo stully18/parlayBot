@@ -148,6 +148,7 @@ def _register_commands(bot: DegenBot) -> None:
                 prop_odds=prop_odds,
                 anchor_events=requested_events,
                 target_odds=target_odds,
+                include_unrequested_games=False,
             )
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
@@ -160,6 +161,7 @@ def _register_commands(bot: DegenBot) -> None:
                 legs,
                 anchor_events=requested_events,
                 target_odds=target_odds,
+                include_unrequested_games=False,
             )
             if built is not None:
                 prop_note = "Props were open, but no prop combo fit the odds window. Returned moneylines instead."

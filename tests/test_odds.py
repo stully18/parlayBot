@@ -198,6 +198,20 @@ def test_build_best_parlay_supports_multiple_requested_games():
     assert {leg.matchup for leg in parlay.legs} == {"Brazil at USA", "Japan at France"}
 
 
+def test_build_best_parlay_can_exclude_unrequested_games():
+    events = normalize_events(
+        [
+            _event("game-1", "USA", "Brazil", [("USA", -140), ("Brazil", 125)]),
+            _event("game-2", "France", "Japan", [("France", -150), ("Japan", 130)]),
+        ],
+        "soccer_fifa_world_cup",
+    )
+
+    parlay = build_best_parlay(events, "USA Brazil", 2, include_unrequested_games=False)
+
+    assert parlay is None
+
+
 def test_build_best_parlay_ignores_zero_odds():
     events = normalize_events(
         [

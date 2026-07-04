@@ -67,6 +67,7 @@ def build_best_parlay(
     prop_odds: list[PropOdds] | None = None,
     anchor_events: list[EventOdds] | None = None,
     target_odds: int | None = None,
+    include_unrequested_games: bool = True,
     min_odds: int = 101,
     max_odds: int = 999,
 ) -> BuiltParlay | None:
@@ -100,13 +101,15 @@ def build_best_parlay(
     ]
     anchor_candidates.extend(anchor_moneylines)
 
-    other_moneylines = [
-        pick
-        for event in events
-        if event.matchup not in anchor_matchups
-        for pick in [_best_pick_for_event(event)]
-        if pick is not None
-    ]
+    other_moneylines = []
+    if include_unrequested_games:
+        other_moneylines = [
+            pick
+            for event in events
+            if event.matchup not in anchor_matchups
+            for pick in [_best_pick_for_event(event)]
+            if pick is not None
+        ]
     pool = [*anchor_candidates, *other_moneylines]
     pool.sort(key=_parlay_leg_probability, reverse=True)
     pool = pool[:32]
