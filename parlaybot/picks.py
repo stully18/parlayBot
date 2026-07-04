@@ -13,6 +13,7 @@ class Pick:
     market: str = "Moneyline"
     conflict_key: str | None = None
     bookmaker_keys: tuple[str, ...] = ()
+    bookmaker_links: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,7 @@ def _best_pick_for_event(event: EventOdds) -> Pick | None:
         market="Moneyline",
         conflict_key=f"{event.matchup}:moneyline",
         bookmaker_keys=tuple(sorted(outcome.prices)),
+        bookmaker_links=dict(sorted((outcome.links or {}).items())),
     )
 
 
@@ -204,6 +206,7 @@ def _pick_from_prop(prop: PropOdds) -> Pick:
         market=prop.market_name,
         conflict_key=prop.conflict_key,
         bookmaker_keys=tuple(sorted(prop.prices)),
+        bookmaker_links=dict(sorted((prop.links or {}).items())),
     )
 
 

@@ -26,7 +26,18 @@ def test_normalize_events_filters_books_and_computes_consensus():
                 },
                 {
                     "key": "fanduel",
-                    "markets": [{"key": "h2h", "outcomes": [{"name": "USA", "price": 130}]}],
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {
+                                    "name": "USA",
+                                    "price": 130,
+                                    "link": "https://sportsbook.fanduel.com/addToBetslip?marketId=42.1&selectionId=29165",
+                                }
+                            ],
+                        }
+                    ],
                 },
                 {
                     "key": "bet365",
@@ -45,6 +56,9 @@ def test_normalize_events_filters_books_and_computes_consensus():
     assert len(events) == 1
     assert events[0].matchup == "Brazil at USA"
     assert events[0].outcomes[0].prices == {"bet365": 140, "draftkings": 150, "fanduel": 130}
+    assert events[0].outcomes[0].links == {
+        "fanduel": "https://sportsbook.fanduel.com/addToBetslip?marketId=42.1&selectionId=29165"
+    }
     assert events[0].outcomes[0].consensus == 140
 
 
@@ -153,7 +167,13 @@ def test_build_best_parlay_uses_props_by_default_when_available():
                         {
                             "key": "player_shots_on_target",
                             "outcomes": [
-                                {"name": "Over", "description": "Alex Morgan", "price": -110, "point": 1.5},
+                                {
+                                    "name": "Over",
+                                    "description": "Alex Morgan",
+                                    "price": -110,
+                                    "point": 1.5,
+                                    "link": "https://sportsbook.fanduel.com/addToBetslip?marketId=42.2&selectionId=800",
+                                },
                             ],
                         }
                     ],
@@ -166,6 +186,7 @@ def test_build_best_parlay_uses_props_by_default_when_available():
 
     assert parlay is not None
     assert any(leg.market == "Shots on Target" for leg in parlay.legs)
+    assert any("fanduel" in (leg.bookmaker_links or {}) for leg in parlay.legs)
     assert 101 <= parlay.odds <= 999
 
 
@@ -256,6 +277,38 @@ def test_normalize_event_props_formats_soccer_props():
     assert props[0].consensus == 150
 
 
+def test_normalize_event_props_keeps_outcome_links():
+    props = normalize_event_props(
+        {
+            "home_team": "USA",
+            "away_team": "Brazil",
+            "bookmakers": [
+                {
+                    "key": "fanduel",
+                    "markets": [
+                        {
+                            "key": "player_shots",
+                            "outcomes": [
+                                {
+                                    "name": "Over",
+                                    "description": "Alex Morgan",
+                                    "price": -120,
+                                    "point": 2.5,
+                                    "link": "https://sportsbook.fanduel.com/addToBetslip?marketId=42.2&selectionId=123",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert props[0].links == {
+        "fanduel": "https://sportsbook.fanduel.com/addToBetslip?marketId=42.2&selectionId=123"
+    }
+
+
 async def test_fetch_odds_coalesces_concurrent_requests():
     client = OddsClient("key", ("draftkings", "fanduel"))
     calls = 0
@@ -276,6 +329,22 @@ async def test_fetch_odds_coalesces_concurrent_requests():
     assert calls == 1
     assert first[0].matchup == "Brazil at USA"
     assert second[0].matchup == "Brazil at USA"
+
+
+async def test_fetch_odds_requests_bookmaker_deep_links():
+    client = OddsClient("key", ("draftkings", "fanduel"))
+    seen_params = {}
+
+    async def fake_request_json(url, params):
+        seen_params.update(params)
+        return [_event("game-1", "USA", "Brazil", [("USA", -120), ("Brazil", 110)])]
+
+    client._request_json = fake_request_json
+
+    await client.fetch_odds("soccer_fifa_world_cup")
+
+    assert seen_params["includeLinks"] == "true"
+    assert seen_params["includeSids"] == "true"
 
 
 def test_build_best_parlay_rejects_invalid_leg_count():

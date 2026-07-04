@@ -70,12 +70,18 @@ def test_parlay_embed_includes_shared_bookmaker_link_at_bottom():
                 selection="Over 11.5 Total Corners",
                 odds=-310,
                 bookmaker_keys=("fanduel",),
+                bookmaker_links={
+                    "fanduel": "https://sportsbook.fanduel.com/addToBetslip?marketId=42.100&selectionId=111"
+                },
             ),
             Pick(
                 matchup="Paraguay at France",
                 selection="Ousmane Dembele Over 0.5 Shots on Target",
                 odds=-125,
                 bookmaker_keys=("fanduel",),
+                bookmaker_links={
+                    "fanduel": "https://sportsbook.fanduel.com/addToBetslip?marketId=42.200&selectionId=222"
+                },
             ),
         ),
         odds=141,
@@ -85,7 +91,11 @@ def test_parlay_embed_includes_shared_bookmaker_link_at_bottom():
 
     build_field = embed.fields[-1]
     assert build_field.name == "Build Parlay"
-    assert "[FanDuel](https://sportsbook.fanduel.com/)" in build_field.value
+    assert "[FanDuel Parlay Betslip]" in build_field.value
+    assert "marketId%5B0%5D=42.100" in build_field.value
+    assert "selectionId%5B0%5D=111" in build_field.value
+    assert "marketId%5B1%5D=42.200" in build_field.value
+    assert "selectionId%5B1%5D=222" in build_field.value
 
 
 def test_parlay_embed_skips_bottom_link_without_shared_bookmaker():

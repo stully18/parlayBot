@@ -57,6 +57,7 @@ BOOKMAKER_LINKS = {
 class OutcomeOdds:
     name: str
     prices: dict[str, int]
+    links: dict[str, str] | None = None
 
     @property
     def consensus(self) -> int | None:
@@ -87,6 +88,7 @@ class PropOdds:
     selection: str
     prices: dict[str, int]
     conflict_key: str
+    links: dict[str, str] | None = None
 
     @property
     def consensus(self) -> int | None:
@@ -134,6 +136,7 @@ def normalize_events(
 
     for raw_event in payload:
         outcomes_by_name: dict[str, dict[str, int]] = {}
+        links_by_name: dict[str, dict[str, str]] = {}
         for bookmaker in raw_event.get("bookmakers", []):
             key = str(bookmaker.get("key", "")).lower()
             if key not in bookmaker_set:
@@ -148,9 +151,16 @@ def normalize_events(
                     if not name or not isinstance(price, int):
                         continue
                     outcomes_by_name.setdefault(name, {})[key] = price
+                    link = outcome.get("link")
+                    if isinstance(link, str) and link:
+                        links_by_name.setdefault(name, {})[key] = link
 
         outcomes = tuple(
-            OutcomeOdds(name=name, prices=dict(sorted(prices.items())))
+            OutcomeOdds(
+                name=name,
+                prices=dict(sorted(prices.items())),
+                links=dict(sorted(links_by_name.get(name, {}).items())),
+            )
             for name, prices in sorted(outcomes_by_name.items())
         )
         if not outcomes:
@@ -177,6 +187,7 @@ def normalize_event_props(
     bookmaker_set = {book.lower() for book in bookmakers}
     matchup = f"{payload.get('away_team', '')} at {payload.get('home_team', '')}"
     props_by_key: dict[tuple[str, str, str], dict[str, int]] = {}
+    links_by_key: dict[tuple[str, str, str], dict[str, str]] = {}
     labels_by_key: dict[tuple[str, str, str], str] = {}
 
     for bookmaker in payload.get("bookmakers", []):
@@ -201,6 +212,9 @@ def normalize_event_props(
                 conflict_key = _prop_conflict_key(market_key, name, description)
                 key = (market_key, conflict_key, label)
                 props_by_key.setdefault(key, {})[book_key] = price
+                link = outcome.get("link")
+                if isinstance(link, str) and link:
+                    links_by_key.setdefault(key, {})[book_key] = link
                 labels_by_key[key] = label
 
     props = [
@@ -211,6 +225,7 @@ def normalize_event_props(
             selection=labels_by_key[key],
             prices=dict(sorted(prices.items())),
             conflict_key=f"{matchup}:{conflict_key}",
+            links=dict(sorted(links_by_key.get(key, {}).items())),
         )
         for key, prices in props_by_key.items()
         for market_key, conflict_key, _label in [key]
@@ -259,6 +274,8 @@ class OddsClient:
                 "markets": ",".join(SUPPORTED_MARKETS),
                 "oddsFormat": "american",
                 "bookmakers": ",".join(self.bookmakers),
+                "includeLinks": "true",
+                "includeSids": "true",
             }
             url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
             payload = await self._request_json(url, params=params)
@@ -315,6 +332,8 @@ class OddsClient:
                 "markets": ",".join(requested_markets),
                 "oddsFormat": "american",
                 "bookmakers": ",".join(self.bookmakers),
+                "includeLinks": "true",
+                "includeSids": "true",
             }
             url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event.event_id}/odds"
             payload = await self._request_json(url, params=params)

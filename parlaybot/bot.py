@@ -4,6 +4,7 @@ import asyncio
 import argparse
 import logging
 from datetime import datetime, time
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import discord
 from discord import app_commands
@@ -307,9 +308,14 @@ def _parlay_embed(parlay: BuiltParlay, props_checked: bool = False, prop_note: s
         )
     parlay_book_links = _shared_bookmaker_links(parlay.legs)
     if parlay_book_links:
+        instructions = "Open the book and add the legs above."
+        fanduel_betslip = _fanduel_parlay_betslip_link(parlay.legs)
+        if fanduel_betslip:
+            parlay_book_links = f"[FanDuel Parlay Betslip]({fanduel_betslip})"
+            instructions = "Opens FanDuel with these legs in the betslip when the line is still available."
         embed.add_field(
             name="Build Parlay",
-            value=f"{parlay_book_links}\nOpen the book and add the legs above.",
+            value=f"{parlay_book_links}\n{instructions}",
             inline=False,
         )
     embed.set_footer(text="Filtered to greater than +100 and less than +1000. Props are tried by default.")
@@ -335,6 +341,43 @@ def _shared_bookmaker_links(picks: tuple[Pick, ...]) -> str:
         shared_books &= set(pick.bookmaker_keys)
     ordered_books = tuple(book for book in BOOKMAKER_LINKS if book in shared_books)
     return _bookmaker_links(ordered_books)
+
+
+def _fanduel_parlay_betslip_link(picks: tuple[Pick, ...]) -> str | None:
+    selections: list[tuple[str, str]] = []
+    for pick in picks:
+        link = (pick.bookmaker_links or {}).get("fanduel")
+        if not link:
+            return None
+        selection = _fanduel_market_selection(link)
+        if selection is None:
+            return None
+        selections.append(selection)
+
+    params: list[tuple[str, str]] = []
+    for index, (market_id, selection_id) in enumerate(selections):
+        params.append((f"marketId[{index}]", market_id))
+        params.append((f"selectionId[{index}]", selection_id))
+    query = urlencode(params)
+    return f"https://account.sportsbook.fanduel.com/sportsbook/addToBetslip?{query}"
+
+
+def _fanduel_market_selection(link: str) -> tuple[str, str] | None:
+    parsed = urlparse(link)
+    params = parse_qs(parsed.query)
+    market_id = _first_query_value(params, "marketId")
+    selection_id = _first_query_value(params, "selectionId")
+    if not market_id or not selection_id:
+        return None
+    return market_id, selection_id
+
+
+def _first_query_value(params: dict[str, list[str]], name: str) -> str | None:
+    for key in (name, f"{name}[0]"):
+        values = params.get(key)
+        if values and values[0]:
+            return values[0]
+    return None
 
 
 def _target_window_label(target_odds: int | None) -> str:
